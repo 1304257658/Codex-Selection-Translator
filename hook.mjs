@@ -17,10 +17,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   engine: "local",
   sourceLanguage: "auto",
   targetLanguage: "zh-CN",
+  downloadedLanguagePairs: [],
+  languageDetectorDownloaded: false,
 });
 
 const ALLOWED_ENGINES = new Set(["local", "google", "bing"]);
 const ALLOWED_LANGUAGE = /^[A-Za-z]{2,3}(?:-[A-Za-z]{2,8})?$/;
+const ALLOWED_LANGUAGE_PAIR = /^([A-Za-z]{2,3}(?:-[A-Za-z]{2,8})?):([A-Za-z]{2,3}(?:-[A-Za-z]{2,8})?)$/;
 
 export function normalizeTranslationText(text = "") {
   const normalized = String(text)
@@ -46,7 +49,23 @@ export function normalizeSettings(value = {}, current = DEFAULT_SETTINGS) {
     : ALLOWED_LANGUAGE.test(current.targetLanguage || "")
       ? current.targetLanguage
       : DEFAULT_SETTINGS.targetLanguage;
-  return { engine, sourceLanguage, targetLanguage };
+  const pairSource = Array.isArray(value.downloadedLanguagePairs)
+    ? value.downloadedLanguagePairs
+    : Array.isArray(current.downloadedLanguagePairs) ? current.downloadedLanguagePairs : [];
+  const downloadedLanguagePairs = [...new Set(pairSource.filter((pair) => {
+    const match = typeof pair === "string" ? pair.match(ALLOWED_LANGUAGE_PAIR) : null;
+    return match && match[1] !== match[2];
+  }))].slice(0, 256);
+  const languageDetectorDownloaded = typeof value.languageDetectorDownloaded === "boolean"
+    ? value.languageDetectorDownloaded
+    : Boolean(current.languageDetectorDownloaded);
+  return {
+    engine,
+    sourceLanguage,
+    targetLanguage,
+    downloadedLanguagePairs,
+    languageDetectorDownloaded,
+  };
 }
 
 async function loadSettings() {
@@ -75,33 +94,69 @@ function withTimeout(milliseconds = 15000) {
   return AbortSignal.timeout(milliseconds);
 }
 
-export function parseGoogleResponse(payload) {
-  const segments = Array.isArray(payload?.[0]) ? payload[0] : [];
-  const text = segments.map((segment) => segment?.[0] || "").join("").trim();
-  if (!text) throw new Error("Google 翻译没有返回译文");
-  return { text, detectedLanguage: payload?.[2] || "auto" };
+async function fetchTranslationService(service, url, options = {}) {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw new Error(`${service} 翻译请求超时`);
+    }
+    const detail = error?.cause?.code || error?.cause?.message || error?.message;
+    throw new Error(`${service} 网络请求失败${detail ? `：${detail}` : ""}，请检查网络或代理设置`);
+  }
 }
 
-async function translateWithGoogle(text, settings) {
+export function parseGoogleResponse(payload) {
+  const first = payload?.[0];
+  let detectedLanguage = "auto";
+  let text = "";
+
+  if (typeof first === "string") {
+    text = first;
+  } else if (Array.isArray(first) && typeof first[0] === "string") {
+    // clients5 dict-chrome-ex: [["translated text", "detected language"]]
+    text = first[0];
+    detectedLanguage = typeof first[1] === "string" ? first[1] : "auto";
+  } else if (Array.isArray(first)) {
+    // Legacy translate_a/single: [[['translated', 'source'], ...], ..., 'en']
+    text = first.map((segment) => segment?.[0] || "").join("");
+    detectedLanguage = payload?.[2] || "auto";
+  }
+
+  text = text.trim();
+  if (!text) throw new Error("Google 翻译没有返回译文");
+  return { text, detectedLanguage };
+}
+
+export async function translateWithGoogle(text, settings) {
   const params = new URLSearchParams({
-    client: "gtx",
+    client: "dict-chrome-ex",
     sl: settings.sourceLanguage,
     tl: settings.targetLanguage,
-    dt: "t",
-    q: text,
   });
-  const response = await fetch(`https://translate.googleapis.com/translate_a/single?${params}`, {
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.3",
+  const response = await fetchTranslationService(
+    "Google",
+    `https://clients5.google.com/translate_a/t?${params}`,
+    {
+      method: "POST",
+      body: new URLSearchParams({ q: text }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.6",
+      },
+      signal: withTimeout(),
     },
-    signal: withTimeout(),
-  });
+  );
   if (response.status === 429) {
     throw new Error("Google 无 Key 接口已被限流（HTTP 429）");
   }
   if (!response.ok) throw new Error(`Google 翻译返回 HTTP ${response.status}`);
-  return parseGoogleResponse(await response.json());
+  const parsed = parseGoogleResponse(await response.json());
+  if (parsed.detectedLanguage === "auto" && settings.sourceLanguage !== "auto") {
+    parsed.detectedLanguage = settings.sourceLanguage;
+  }
+  return parsed;
 }
 
 export function bingLanguage(language) {
@@ -134,7 +189,7 @@ let bingRequestCount = 0;
 
 async function getBingAuth(force = false) {
   if (!force && bingAuth?.expiresAt - Date.now() > 60_000) return bingAuth;
-  const response = await fetch("https://www.bing.com/translator", {
+  const response = await fetchTranslationService("Bing", "https://www.bing.com/translator", {
     headers: { "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.4" },
     signal: withTimeout(),
   });
@@ -144,7 +199,7 @@ async function getBingAuth(force = false) {
   return bingAuth;
 }
 
-async function translateWithBing(text, settings, retry = true) {
+export async function translateWithBing(text, settings, retry = true) {
   const auth = await getBingAuth();
   const query = new URLSearchParams({
     isVertical: "1",
@@ -160,7 +215,7 @@ async function translateWithBing(text, settings, retry = true) {
     key: String(auth.key),
     token: auth.token,
   });
-  const response = await fetch(`https://www.bing.com/ttranslatev3?${query}`, {
+  const response = await fetchTranslationService("Bing", `https://www.bing.com/ttranslatev3?${query}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -173,9 +228,21 @@ async function translateWithBing(text, settings, retry = true) {
     await getBingAuth(true);
     return translateWithBing(text, settings, false);
   }
-  const payload = await response.json().catch(() => null);
+  const raw = await response.text();
+  let payload = null;
+  try {
+    payload = raw ? JSON.parse(raw) : null;
+  } catch {
+    // The error below reports an invalid response without exposing a full HTML page.
+  }
   if (!response.ok) {
     throw new Error(payload?.errorMessage || `Bing 翻译返回 HTTP ${response.status}`);
+  }
+  if (!raw) {
+    throw new Error("Bing 翻译返回空响应，请检查网络或代理设置");
+  }
+  if (!payload) {
+    throw new Error("Bing 翻译返回了无法解析的响应");
   }
   return parseBingResponse(payload);
 }
@@ -343,14 +410,27 @@ async function runInjection(target, rendererSource) {
 export async function main() {
   const rendererSource = await readFile(RENDERER_PATH, "utf8");
   const keepAlive = setInterval(() => {}, 30000);
+  const disconnectGraceMs = 30000;
+  let connectedOnce = false;
+  let disconnectedAt = 0;
   console.log(`[translator] 等待 Codex CDP：127.0.0.1:${CDP_PORT}`);
   try {
     for (;;) {
       try {
         const target = await findCodexTarget();
         if (!target) throw new Error("没有发现 Codex 页面");
+        connectedOnce = true;
+        disconnectedAt = 0;
         await runInjection(target, rendererSource);
+        disconnectedAt = Date.now();
       } catch (error) {
+        if (connectedOnce) {
+          if (!disconnectedAt) disconnectedAt = Date.now();
+          if (Date.now() - disconnectedAt >= disconnectGraceMs) {
+            console.log("\n[translator] Codex 已退出，翻译后端同步停止。");
+            return;
+          }
+        }
         process.stdout.write(`\r[translator] ${error.message}；正在重试…                    `);
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }

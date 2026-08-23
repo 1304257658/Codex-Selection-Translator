@@ -22,12 +22,38 @@ test("normalizes only supported settings", () => {
   assert.equal(value.sourceLanguage, "en");
   assert.equal(value.targetLanguage, "ja");
   assert.equal(normalizeSettings({ engine: "model" }).engine, DEFAULT_SETTINGS.engine);
-  assert.deepEqual(Object.keys(normalizeSettings({ googleApiKey: "legacy" })).sort(), ["engine", "sourceLanguage", "targetLanguage"]);
+  assert.deepEqual(Object.keys(normalizeSettings({ googleApiKey: "legacy" })).sort(), [
+    "downloadedLanguagePairs",
+    "engine",
+    "languageDetectorDownloaded",
+    "sourceLanguage",
+    "targetLanguage",
+  ]);
 });
 
-test("parses Google segmented output", () => {
+test("normalizes managed local language packs", () => {
+  const value = normalizeSettings({
+    downloadedLanguagePairs: ["en:zh", "en:zh", "auto:zh", "en:en", "invalid"],
+    languageDetectorDownloaded: true,
+  });
+  assert.deepEqual(value.downloadedLanguagePairs, ["en:zh"]);
+  assert.equal(value.languageDetectorDownloaded, true);
+});
+
+test("parses Google legacy segmented output", () => {
   assert.deepEqual(parseGoogleResponse([[['你好', 'hello'], ['世界', 'world']], null, 'en']), {
     text: "你好世界",
+    detectedLanguage: "en",
+  });
+});
+
+test("parses Google Chrome dictionary output", () => {
+  assert.deepEqual(parseGoogleResponse(["你好"]), {
+    text: "你好",
+    detectedLanguage: "auto",
+  });
+  assert.deepEqual(parseGoogleResponse([["你好世界。\n你好吗？", "en"]]), {
+    text: "你好世界。\n你好吗？",
     detectedLanguage: "en",
   });
 });

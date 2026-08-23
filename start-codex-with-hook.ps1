@@ -2,11 +2,15 @@
 param(
   [string]$CodexExe = $env:CODEX_DESKTOP_EXE,
   [int]$Port = 9222,
-  [string]$LogPath
+  [string]$LogPath,
+  [string]$ProxyUrl = $env:CODEX_TRANSLATOR_PROXY_URL,
+  [string]$CaBundlePath = $env:CODEX_TRANSLATOR_CA_BUNDLE
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$defaultProxyUrl = 'http://127.0.0.1:10808'
+if (-not $CaBundlePath) { $CaBundlePath = Join-Path $root 'codex-ca-bundle.pem' }
 $env:CODEX_TRANSLATOR_CDP_PORT = [string]$Port
 $backendMutex = New-Object System.Threading.Mutex($false, 'Local\CodexTranslationPluginBackend')
 $ownsBackendMutex = $false
@@ -18,6 +22,25 @@ function Test-CdpPort {
     return $true
   } catch {
     return $false
+  }
+}
+
+function Test-CodexProxy {
+  param([string]$CandidateProxyUrl)
+
+  if (-not $CandidateProxyUrl) { return $false }
+  $client = New-Object Net.Sockets.TcpClient
+  try {
+    $proxyUri = New-Object Uri($CandidateProxyUrl)
+    if (-not $proxyUri.Host -or $proxyUri.Port -lt 1) { return $false }
+    $connect = $client.BeginConnect($proxyUri.Host, $proxyUri.Port, $null, $null)
+    if (-not $connect.AsyncWaitHandle.WaitOne(1000, $false)) { return $false }
+    $client.EndConnect($connect)
+    return $true
+  } catch {
+    return $false
+  } finally {
+    $client.Dispose()
   }
 }
 
@@ -77,14 +100,27 @@ function Find-CodexExecutable {
 }
 
 try {
-  try {
-    $ownsBackendMutex = $backendMutex.WaitOne(0, $false)
-  } catch [System.Threading.AbandonedMutexException] {
-    $ownsBackendMutex = $true
+  $proxyWasConfigured = [bool]$ProxyUrl
+  if (-not $ProxyUrl -and (Test-CodexProxy -CandidateProxyUrl $defaultProxyUrl)) {
+    $ProxyUrl = $defaultProxyUrl
   }
-  if (-not $ownsBackendMutex) {
-    Write-Host 'The Codex translation backend is already running.'
-    return
+  if ($ProxyUrl) {
+    if (-not (Test-CodexProxy -CandidateProxyUrl $ProxyUrl)) {
+      if ($proxyWasConfigured) { throw "Configured proxy is not reachable: $ProxyUrl" }
+      $ProxyUrl = $null
+    } else {
+      $env:HTTP_PROXY = $ProxyUrl
+      $env:HTTPS_PROXY = $ProxyUrl
+      $env:ALL_PROXY = $ProxyUrl
+      $env:NO_PROXY = '127.0.0.1,localhost'
+      $env:NODE_USE_ENV_PROXY = '1'
+    }
+  }
+  if (Test-Path -LiteralPath $CaBundlePath -PathType Leaf) {
+    $env:CODEX_CA_CERTIFICATE = $CaBundlePath
+    $env:NODE_EXTRA_CA_CERTS = $CaBundlePath
+  } elseif ($env:CODEX_TRANSLATOR_CA_BUNDLE) {
+    throw "Configured CA bundle was not found: $CaBundlePath"
   }
 
   if (-not (Test-CdpPort -CandidatePort $Port)) {
@@ -101,10 +137,24 @@ try {
     }
 
     Write-Host "Starting Codex with CDP bound to 127.0.0.1:$Port ..."
-    Start-Process -FilePath $CodexExe -ArgumentList @(
+    $codexArguments = @(
       "--remote-debugging-address=127.0.0.1",
       "--remote-debugging-port=$Port"
     )
+    if ($ProxyUrl) { $codexArguments += "--proxy-server=$ProxyUrl" }
+    Start-Process -FilePath $CodexExe -ArgumentList $codexArguments
+  }
+
+  # Launch Codex before checking the backend mutex. A backend left waiting after
+  # Codex exits must never prevent the shortcut from starting Codex again.
+  try {
+    $ownsBackendMutex = $backendMutex.WaitOne(0, $false)
+  } catch [System.Threading.AbandonedMutexException] {
+    $ownsBackendMutex = $true
+  }
+  if (-not $ownsBackendMutex) {
+    Write-Host 'The Codex translation backend is already running.'
+    return
   }
 
   Set-Location -LiteralPath $root

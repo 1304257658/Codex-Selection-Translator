@@ -6,3 +6,6 @@ Thumbs.db
 # Local history and browser fixtures are not part of the published package.
 outputs/
 work/
+
+# Optional local certificate bundle used by proxy/TLS setups.
+codex-ca-bundle.pem

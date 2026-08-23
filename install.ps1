@@ -16,6 +16,7 @@ $requiredFiles = @(
   'launch-hidden.vbs',
   'uninstall.ps1'
 )
+$optionalFiles = @('codex-ca-bundle.pem')
 
 function Find-CodexIconSource {
   function Resolve-IconSource([string]$ExecutablePath) {
@@ -77,6 +78,12 @@ New-Item -ItemType Directory -Path $installPath -Force | Out-Null
 foreach ($fileName in $requiredFiles) {
   Copy-Item -LiteralPath (Join-Path $sourceRoot $fileName) `
     -Destination (Join-Path $installPath $fileName) -Force
+}
+foreach ($fileName in $optionalFiles) {
+  $sourcePath = Join-Path $sourceRoot $fileName
+  if (Test-Path -LiteralPath $sourcePath -PathType Leaf) {
+    Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $installPath $fileName) -Force
+  }
 }
 Set-Content -LiteralPath (Join-Path $installPath '.codex-translation-plugin') `
   -Value 'Codex Translation Plugin' -Encoding ASCII
