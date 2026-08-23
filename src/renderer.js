@@ -1,10 +1,12 @@
 (() => {
-  const STATE_KEY = "__codexSelectionTranslatorStandalone";
-  const HOST_ID = "codex-selection-translator-standalone";
+  const LEGACY_STATE_KEY = "__codexSelectionTranslatorStandalone";
+  const STATE_KEY = "__codexSelectionTranslator";
+  const HOST_ID = "codex-selection-translator";
   const call = window.__codexTranslatorCall;
   const normalizeTranslationText = window.__codexNormalizeTranslationText;
   if (typeof call !== "function" || typeof normalizeTranslationText !== "function") return;
 
+  window[LEGACY_STATE_KEY]?.destroy?.();
   window[STATE_KEY]?.destroy?.();
 
   const LANGUAGES = [
@@ -785,7 +787,7 @@
   document.documentElement.appendChild(host);
 
   window[STATE_KEY] = {
-    version: "0.6.6",
+    version: "0.7.0",
     destroy() {
       disposed = true;
       clearTimeout(timer);

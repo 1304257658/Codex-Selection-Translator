@@ -8,11 +8,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root = Split-Path -Parent $scriptsRoot
+$hookPath = Join-Path $root 'src\hook.mjs'
 $defaultProxyUrl = 'http://127.0.0.1:10808'
 if (-not $CaBundlePath) { $CaBundlePath = Join-Path $root 'codex-ca-bundle.pem' }
 $env:CODEX_TRANSLATOR_CDP_PORT = [string]$Port
-$backendMutex = New-Object System.Threading.Mutex($false, 'Local\CodexTranslationPluginBackend')
+$backendMutex = New-Object System.Threading.Mutex($false, 'Local\CodexSelectionTranslatorBackend')
 $ownsBackendMutex = $false
 
 function Test-CdpPort {
@@ -158,7 +160,7 @@ try {
   }
 
   Set-Location -LiteralPath $root
-  node "$root\hook.mjs"
+  node $hookPath
 } catch {
   if ($LogPath) {
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'

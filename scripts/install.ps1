@@ -1,20 +1,21 @@
 # Keep this file ASCII-compatible because Windows PowerShell 5.1 misreads UTF-8 without a BOM.
 [CmdletBinding()]
 param(
-  [string]$InstallDir = $(Join-Path $env:LOCALAPPDATA 'CodexTranslationPlugin'),
-  [string]$ShortcutPath = $(Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex Translation.lnk')
+  [string]$InstallDir = $(Join-Path $env:LOCALAPPDATA 'CodexSelectionTranslator'),
+  [string]$ShortcutPath = $(Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex Selection Translator.lnk')
 )
 
 $ErrorActionPreference = 'Stop'
-$sourceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$sourceRoot = Split-Path -Parent $scriptsRoot
 $installPath = [IO.Path]::GetFullPath($InstallDir)
 $shortcutFullPath = [IO.Path]::GetFullPath($ShortcutPath)
 $requiredFiles = @(
-  'hook.mjs',
-  'renderer.js',
-  'start-codex-with-hook.ps1',
-  'launch-hidden.vbs',
-  'uninstall.ps1'
+  @{ Source = 'src\hook.mjs'; Destination = 'src\hook.mjs' },
+  @{ Source = 'src\renderer.js'; Destination = 'src\renderer.js' },
+  @{ Source = 'scripts\start-codex-with-hook.ps1'; Destination = 'scripts\start-codex-with-hook.ps1' },
+  @{ Source = 'scripts\launch-hidden.vbs'; Destination = 'scripts\launch-hidden.vbs' },
+  @{ Source = 'scripts\uninstall.ps1'; Destination = 'scripts\uninstall.ps1' }
 )
 $optionalFiles = @('codex-ca-bundle.pem')
 
@@ -67,17 +68,18 @@ if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
   throw 'Node.js was not found in PATH. Install Node.js 22 or later first.'
 }
 
-foreach ($fileName in $requiredFiles) {
-  $sourcePath = Join-Path $sourceRoot $fileName
+foreach ($file in $requiredFiles) {
+  $sourcePath = Join-Path $sourceRoot $file.Source
   if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
     throw "Required file is missing: $sourcePath"
   }
 }
 
 New-Item -ItemType Directory -Path $installPath -Force | Out-Null
-foreach ($fileName in $requiredFiles) {
-  Copy-Item -LiteralPath (Join-Path $sourceRoot $fileName) `
-    -Destination (Join-Path $installPath $fileName) -Force
+foreach ($file in $requiredFiles) {
+  $destinationPath = Join-Path $installPath $file.Destination
+  New-Item -ItemType Directory -Path (Split-Path -Parent $destinationPath) -Force | Out-Null
+  Copy-Item -LiteralPath (Join-Path $sourceRoot $file.Source) -Destination $destinationPath -Force
 }
 foreach ($fileName in $optionalFiles) {
   $sourcePath = Join-Path $sourceRoot $fileName
@@ -85,8 +87,8 @@ foreach ($fileName in $optionalFiles) {
     Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $installPath $fileName) -Force
   }
 }
-Set-Content -LiteralPath (Join-Path $installPath '.codex-translation-plugin') `
-  -Value 'Codex Translation Plugin' -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $installPath '.codex-selection-translator') `
+  -Value 'Codex Selection Translator' -Encoding ASCII
 
 $iconSource = Find-CodexIconSource
 $iconPath = Join-Path $installPath 'codex.ico'
@@ -118,9 +120,9 @@ if (-not (Test-Path -LiteralPath $wscriptPath -PathType Leaf)) {
 $wshShell = New-Object -ComObject WScript.Shell
 $shortcut = $wshShell.CreateShortcut($shortcutFullPath)
 $shortcut.TargetPath = $wscriptPath
-$shortcut.Arguments = '"' + (Join-Path $installPath 'launch-hidden.vbs') + '"'
+$shortcut.Arguments = '"' + (Join-Path $installPath 'scripts\launch-hidden.vbs') + '"'
 $shortcut.WorkingDirectory = $installPath
-$shortcut.Description = 'Start Codex with selection translation enabled'
+$shortcut.Description = 'Start Codex with Codex Selection Translator enabled'
 if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
   $shortcut.IconLocation = "$iconPath,0"
 } elseif ($iconSource) {

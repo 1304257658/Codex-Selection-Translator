@@ -143,7 +143,7 @@ export async function translateWithGoogle(text, settings) {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.6",
+        "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.7",
       },
       signal: withTimeout(),
     },
@@ -190,7 +190,7 @@ let bingRequestCount = 0;
 async function getBingAuth(force = false) {
   if (!force && bingAuth?.expiresAt - Date.now() > 60_000) return bingAuth;
   const response = await fetchTranslationService("Bing", "https://www.bing.com/translator", {
-    headers: { "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.4" },
+    headers: { "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.7" },
     signal: withTimeout(),
   });
   if (!response.ok) throw new Error(`Bing 翻译页面返回 HTTP ${response.status}`);
@@ -219,7 +219,7 @@ export async function translateWithBing(text, settings, retry = true) {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.4",
+      "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.7",
     },
     body,
     signal: withTimeout(),
@@ -359,7 +359,7 @@ export function bridgeBootstrap(rendererSource) {
     const timeoutMs = action === "translateRemote" ? 45000 : 5000;
     const timeout = setTimeout(() => {
       window.__codexTranslatorCallbacks.delete(id);
-      reject(new Error("翻译后端未响应，请重新启动 Codex Translation"));
+      reject(new Error("翻译后端未响应，请重新启动 Codex Selection Translator"));
     }, timeoutMs);
     window.__codexTranslatorCallbacks.set(id, {
       resolve(value) { clearTimeout(timeout); resolve(value); },

@@ -1,8 +1,8 @@
-# Codex Translation Plugin
+# Codex Selection Translator
 
-一个轻量、独立、不调用大模型的 Codex 桌面端划词翻译插件。
+一个轻量、独立、不调用大模型的 Codex 桌面端划词翻译工具。
 
-> 当前处于实验阶段，仅支持 Windows。它不依赖 Codex++，也不是 Chrome 扩展。
+> 非 OpenAI 官方项目，当前处于实验阶段且仅支持 Windows。它不依赖 Codex++，也不是 Codex 官方插件或 Chrome 扩展。
 
 ## 功能
 
@@ -14,19 +14,19 @@
 - 支持自动检测源语言，并可配置目标语言。
 - 源语言和目标语言常驻翻译弹窗，并支持一键交换语言与译文方向；齿轮设置提供翻译引擎和本地语言包管理。
 - 保存设置后自动返回翻译结果；设置页也提供独立的“返回”按钮。
-- 本地语言包由设置页显式下载；快速翻译栏只显示已由插件确认安装的语言对。
-- 注入可重复执行，同一页面只保留一个插件实例。
+- 本地语言包由设置页显式下载；快速翻译栏只显示已由本工具确认安装的语言对。
+- 注入可重复执行，同一页面只保留一个翻译工具实例。
 - 翻译弹窗使用视口固定定位，页面滚动时保持悬浮，直到主动关闭或点击弹窗外部。
 - 本地翻译和后端桥接均有超时保护，不会永久停留在“正在翻译”。
 - Codex 退出后，翻译后端会在短暂重连宽限期后自动结束，不会阻塞下次快捷启动。
-- 翻译代码标识符前自动拆分驼峰命名，并将连字符、下划线转换为空格，例如 `CodexTranslationPlugin` → `Codex Translation Plugin`。
+- 翻译代码标识符前自动拆分驼峰命名，并将连字符、下划线转换为空格，例如 `CodexSelectionTranslator` → `Codex Selection Translator`。
 
 ## 工作方式
 
 ```text
 选择 Codex 中的文本
         ↓
-renderer.js 显示翻译操作条
+src/renderer.js 显示翻译操作条
         ↓
 Chromium 本地翻译（默认）
         ↓ 不可用时
@@ -59,21 +59,21 @@ $env:CODEX_TRANSLATOR_CA_BUNDLE = 'C:\path\to\proxy-ca.pem'
 在 PowerShell 中执行一次安装：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-安装器会把轻量启动器复制到 `%LOCALAPPDATA%\CodexTranslationPlugin`，优先复制 Codex 自带的 `resources\chatgpt-tray-light.ico`（找不到时再从 `ChatGPT.exe` 提取图标），并在桌面创建 `Codex Translation` 快捷方式。之后：
+安装器会把轻量启动器复制到 `%LOCALAPPDATA%\CodexSelectionTranslator`，优先复制 Codex 自带的 `resources\chatgpt-tray-light.ico`（找不到时再从 `ChatGPT.exe` 提取图标），并在桌面创建 `Codex Selection Translator` 快捷方式。之后：
 
 1. 完全退出 Codex，包括系统托盘中的后台进程。
-2. 双击桌面的 `Codex Translation`。
+2. 双击桌面的 `Codex Selection Translator`。
 3. 在 Codex 中选中文本，点击选区下方的“译”。
 
-启动器在后台静默运行，不会保留控制台窗口。每次启动都会重新查询最新的 `OpenAI.Codex` 安装包及其应用清单，因此 Microsoft Store 更新 Codex 后不需要重新安装本插件。
+启动器在后台静默运行，不会保留控制台窗口。每次启动都会重新查询最新的 `OpenAI.Codex` 安装包及其应用清单，因此 Microsoft Store 更新 Codex 后不需要重新安装本工具。
 
 如果静默启动失败，可查看：
 
 ```text
-%LOCALAPPDATA%\CodexTranslationPlugin\launcher.log
+%LOCALAPPDATA%\CodexSelectionTranslator\launcher.log
 ```
 
 ### 卸载
@@ -81,10 +81,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 从项目目录或安装目录运行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\uninstall.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1
 ```
 
-卸载器会停止本插件的 Node.js 后端，并删除桌面快捷方式、启动器和翻译设置；不会卸载或关闭 Codex。
+卸载器会停止本工具的 Node.js 后端，并删除桌面快捷方式、启动器和翻译设置；不会卸载或关闭 Codex。
 
 ### 开发模式
 
@@ -94,10 +94,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\uninstall.ps1
 
 ```powershell
 $env:CODEX_DESKTOP_EXE = 'C:\Program Files\WindowsApps\OpenAI.Codex_<版本>_x64__2p2nqsd0c76g0\app\ChatGPT.exe'
-.\start-codex-with-hook.ps1
+.\scripts\start-codex-with-hook.ps1
 ```
 
-也可以自行使用以下参数启动 Codex，然后运行 `node hook.mjs`：
+也可以自行使用以下参数启动 Codex，然后运行 `node .\src\hook.mjs`：
 
 ```text
 --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222
@@ -117,11 +117,11 @@ $env:CODEX_DESKTOP_EXE = 'C:\Program Files\WindowsApps\OpenAI.Codex_<版本>_x64
 
 ### 本地语言包
 
-打开翻译弹窗右上角的齿轮，上方的源语言和目标语言同时就是默认语言与语言包下载方向；选择尚未安装的组合时会提示先下载。齿轮可在设置和翻译界面之间往返切换。可选的“自动检测包”是 Chromium 用来提高源语言识别准确率的轻量排名模型，不包含翻译模型；未安装时插件仍会使用轻量规则识别。下载过程中会区分“等待 Chromium 启动”“正在下载”和“下载完成，正在初始化”，不会把等待状态误报为长期 `0%`。
+打开翻译弹窗右上角的齿轮，上方的源语言和目标语言同时就是默认语言与语言包下载方向；选择尚未安装的组合时会提示先下载。齿轮可在设置和翻译界面之间往返切换。可选的“自动检测包”是 Chromium 用来提高源语言识别准确率的轻量排名模型，不包含翻译模型；未安装时本工具仍会使用轻量规则识别。下载过程中会区分“等待 Chromium 启动”“正在下载”和“下载完成，正在初始化”，不会把等待状态误报为长期 `0%`。
 
-快速翻译栏的源语言和目标语言都会展示已确认语言对涉及的可用语言。选择一侧后，如果当前组合无效，另一侧会自动切换到可用语言；当 Chromium 确认同一语言包支持反向翻译时，插件会自动登记双向语言对并启用交换。
+快速翻译栏的源语言和目标语言都会展示已确认语言对涉及的可用语言。选择一侧后，如果当前组合无效，另一侧会自动切换到可用语言；当 Chromium 确认同一语言包支持反向翻译时，本工具会自动登记双向语言对并启用交换。
 
-Chromium 出于隐私保护不会向页面完整公开所有全局已下载语言对，因此快速翻译栏只展示通过本插件下载或重新验证成功的语言对。如果浏览器更新或清理了模型数据，可在设置中点击“重新验证翻译包”。
+Chromium 出于隐私保护不会向页面完整公开所有全局已下载语言对，因此快速翻译栏只展示通过本工具下载或重新验证成功的语言对。如果浏览器更新或清理了模型数据，可在设置中点击“重新验证翻译包”。
 
 设置文件位于：
 
@@ -129,7 +129,7 @@ Chromium 出于隐私保护不会向页面完整公开所有全局已下载语�
 %APPDATA%\CodexSelectionTranslator\settings.json
 ```
 
-该设置文件只保存引擎、源语言和目标语言，不保存 API Key。
+该设置文件保存翻译引擎、默认语言和已确认的本地语言包记录，不保存 API Key。
 从 0.3.x 升级时，旧 Key 字段会被忽略，并在下次保存设置时移除。
 
 ## 隐私与安全
@@ -164,14 +164,16 @@ npm test
 项目结构：
 
 ```text
-hook.mjs                    # 本机翻译后端与 CDP 注入器
-renderer.js                 # Codex 页面中的划词 UI 与设置面板
-start-codex-with-hook.ps1   # Windows 启动器
-launch-hidden.vbs           # 无控制台窗口的日常启动入口
-install.ps1                 # 安装启动器并创建桌面快捷方式
-uninstall.ps1               # 删除启动器、快捷方式和设置
-start-hook.cmd              # 开发模式双击入口
-tests/                      # Node.js 单元测试
+src/
+  hook.mjs                    # 本机翻译后端与 CDP 注入器
+  renderer.js                # Codex 页面中的划词 UI 与设置面板
+scripts/
+  install.ps1                # 安装启动器并创建桌面快捷方式
+  uninstall.ps1              # 删除启动器、快捷方式和设置
+  start-codex-with-hook.ps1  # Windows 启动器
+  launch-hidden.vbs          # 无控制台窗口的日常启动入口
+tests/                       # Node.js 单元测试
+start-hook.cmd               # 开发模式双击入口
 ```
 
 ## License

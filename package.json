@@ -1,16 +1,16 @@
 {
-  "name": "codex-selection-translator-standalone",
-  "version": "0.6.6",
+  "name": "codex-selection-translator",
+  "version": "0.7.0",
   "description": "A lightweight, LLM-free selection translator for the Codex desktop app.",
   "private": true,
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/1304257658/codex-translation-plugin.git"
+    "url": "git+https://github.com/1304257658/Codex-Selection-Translator.git"
   },
   "scripts": {
-    "check": "node --check hook.mjs && node --check renderer.js",
+    "check": "node --check src/hook.mjs && node --check src/renderer.js",
     "test": "node --test tests/*.test.mjs"
   },
   "engines": {

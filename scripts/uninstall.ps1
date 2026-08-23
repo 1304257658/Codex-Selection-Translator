@@ -1,17 +1,17 @@
 # Keep this file ASCII-compatible because Windows PowerShell 5.1 misreads UTF-8 without a BOM.
 [CmdletBinding()]
 param(
-  [string]$InstallDir = $(Join-Path $env:LOCALAPPDATA 'CodexTranslationPlugin'),
-  [string]$ShortcutPath = $(Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex Translation.lnk'),
+  [string]$InstallDir = $(Join-Path $env:LOCALAPPDATA 'CodexSelectionTranslator'),
+  [string]$ShortcutPath = $(Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex Selection Translator.lnk'),
   [string]$SettingsDir = $(Join-Path $env:APPDATA 'CodexSelectionTranslator')
 )
 
 $ErrorActionPreference = 'Stop'
 $installPath = [IO.Path]::GetFullPath($InstallDir)
 $shortcutFullPath = [IO.Path]::GetFullPath($ShortcutPath)
-$markerPath = Join-Path $installPath '.codex-translation-plugin'
-$hookPath = Join-Path $installPath 'hook.mjs'
-$launcherPath = Join-Path $installPath 'start-codex-with-hook.ps1'
+$markerPath = Join-Path $installPath '.codex-selection-translator'
+$hookPath = Join-Path $installPath 'src\hook.mjs'
+$launcherPath = Join-Path $installPath 'scripts\start-codex-with-hook.ps1'
 
 if ($installPath -eq [IO.Path]::GetPathRoot($installPath)) {
   throw "Refusing to remove a filesystem root: $installPath"
@@ -61,4 +61,4 @@ if (Test-Path -LiteralPath $settingsPath -PathType Container) {
   Remove-Item -LiteralPath $settingsPath -Recurse -Force
 }
 
-Write-Host 'Codex Translation Plugin was removed.'
+Write-Host 'Codex Selection Translator was removed.'

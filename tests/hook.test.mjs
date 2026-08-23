@@ -10,7 +10,7 @@ import {
   parseBingAuth,
   parseBingResponse,
   parseGoogleResponse,
-} from "../hook.mjs";
+} from "../src/hook.mjs";
 
 test("normalizes only supported settings", () => {
   const value = normalizeSettings({
@@ -78,8 +78,8 @@ test("maps Chinese codes for Bing Translator", () => {
 });
 
 test("normalizes compound identifiers before translation", () => {
-  assert.equal(normalizeTranslationText("CodexTranslationPlugin"), "Codex Translation Plugin");
-  assert.equal(normalizeTranslationText("codex_translation-plugin"), "codex translation plugin");
+  assert.equal(normalizeTranslationText("CodexSelectionTranslator"), "Codex Selection Translator");
+  assert.equal(normalizeTranslationText("codex_selection-translator"), "codex selection translator");
   assert.equal(normalizeTranslationText("HTTPRequest"), "HTTP Request");
   assert.equal(normalizeTranslationText("one---two___three"), "one two three");
 });
