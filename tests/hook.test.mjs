@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
 import {
+  bridgeBootstrap,
   DEFAULT_SETTINGS,
   bingLanguage,
   normalizeSettings,
+  normalizeTranslationText,
   parseBingAuth,
   parseBingResponse,
   parseGoogleResponse,
@@ -46,4 +49,41 @@ test("parses Bing web credentials and output", () => {
 test("maps Chinese codes for Bing Translator", () => {
   assert.equal(bingLanguage("zh-CN"), "zh-Hans");
   assert.equal(bingLanguage("zh-TW"), "zh-Hant");
+});
+
+test("normalizes compound identifiers before translation", () => {
+  assert.equal(normalizeTranslationText("CodexTranslationPlugin"), "Codex Translation Plugin");
+  assert.equal(normalizeTranslationText("codex_translation-plugin"), "codex translation plugin");
+  assert.equal(normalizeTranslationText("HTTPRequest"), "HTTP Request");
+  assert.equal(normalizeTranslationText("one---two___three"), "one two three");
+});
+
+test("times out when the renderer bridge has no backend", async () => {
+  let runTimeout;
+  const context = {
+    clearTimeout() {},
+    crypto: { randomUUID: () => "request-1" },
+    setTimeout(callback) { runTimeout = callback; return 1; },
+    window: { codexTranslatorBridge() {} },
+  };
+  vm.runInNewContext(bridgeBootstrap(""), context);
+  const pending = context.window.__codexTranslatorCall("loadSettings");
+  runTimeout();
+  await assert.rejects(pending, /翻译后端未响应/);
+});
+
+test("resolves renderer bridge calls when the backend responds", async () => {
+  let request;
+  const context = {
+    clearTimeout() {},
+    crypto: { randomUUID: () => "request-2" },
+    setTimeout() { return 1; },
+    window: {
+      codexTranslatorBridge(payload) { request = JSON.parse(payload); },
+    },
+  };
+  vm.runInNewContext(bridgeBootstrap(""), context);
+  const pending = context.window.__codexTranslatorCall("loadSettings");
+  context.window.__codexTranslatorResolve(request.id, { ok: true, value: { engine: "local" } });
+  assert.deepEqual(await pending, { engine: "local" });
 });

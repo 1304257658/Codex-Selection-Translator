@@ -22,6 +22,16 @@ export const DEFAULT_SETTINGS = Object.freeze({
 const ALLOWED_ENGINES = new Set(["local", "google", "bing"]);
 const ALLOWED_LANGUAGE = /^[A-Za-z]{2,3}(?:-[A-Za-z]{2,8})?$/;
 
+export function normalizeTranslationText(text = "") {
+  const normalized = String(text)
+    .replace(/[-_]+/g, " ")
+    .replace(/([a-z\d])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized || String(text).trim();
+}
+
 export function normalizeSettings(value = {}, current = DEFAULT_SETTINGS) {
   const engine = ALLOWED_ENGINES.has(value.engine)
     ? value.engine
@@ -187,6 +197,7 @@ async function translateRemote(text, engine) {
 }
 
 async function handleBridge(action, payload) {
+  if (action === "ping") return true;
   if (action === "loadSettings") return publicSettings(await loadSettings());
   if (action === "saveSettings") return saveSettings(payload || {});
   if (action === "translateRemote") return translateRemote(payload?.text, payload?.engine);
@@ -265,10 +276,11 @@ class CdpSession {
   }
 }
 
-function bridgeBootstrap(rendererSource) {
+export function bridgeBootstrap(rendererSource) {
   return `
 (() => {
   window.__codexTranslatorCallbacks ||= new Map();
+  window.__codexNormalizeTranslationText = ${normalizeTranslationText.toString()};
   window.__codexTranslatorResolve = (id, response) => {
     const callback = window.__codexTranslatorCallbacks.get(id);
     if (!callback) return;
@@ -277,8 +289,22 @@ function bridgeBootstrap(rendererSource) {
   };
   window.__codexTranslatorCall = (action, payload = {}) => new Promise((resolve, reject) => {
     const id = crypto.randomUUID();
-    window.__codexTranslatorCallbacks.set(id, { resolve, reject });
-    window.${BINDING_NAME}(JSON.stringify({ id, action, payload }));
+    const timeoutMs = action === "translateRemote" ? 45000 : 5000;
+    const timeout = setTimeout(() => {
+      window.__codexTranslatorCallbacks.delete(id);
+      reject(new Error("翻译后端未响应，请重新启动 Codex Translation"));
+    }, timeoutMs);
+    window.__codexTranslatorCallbacks.set(id, {
+      resolve(value) { clearTimeout(timeout); resolve(value); },
+      reject(error) { clearTimeout(timeout); reject(error); },
+    });
+    try {
+      window.${BINDING_NAME}(JSON.stringify({ id, action, payload }));
+    } catch (error) {
+      clearTimeout(timeout);
+      window.__codexTranslatorCallbacks.delete(id);
+      reject(error);
+    }
   });
 })();
 ${rendererSource}`;
@@ -316,16 +342,21 @@ async function runInjection(target, rendererSource) {
 
 export async function main() {
   const rendererSource = await readFile(RENDERER_PATH, "utf8");
+  const keepAlive = setInterval(() => {}, 30000);
   console.log(`[translator] 等待 Codex CDP：127.0.0.1:${CDP_PORT}`);
-  for (;;) {
-    try {
-      const target = await findCodexTarget();
-      if (!target) throw new Error("没有发现 Codex 页面");
-      await runInjection(target, rendererSource);
-    } catch (error) {
-      process.stdout.write(`\r[translator] ${error.message}；正在重试…                    `);
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+  try {
+    for (;;) {
+      try {
+        const target = await findCodexTarget();
+        if (!target) throw new Error("没有发现 Codex 页面");
+        await runInjection(target, rendererSource);
+      } catch (error) {
+        process.stdout.write(`\r[translator] ${error.message}；正在重试…                    `);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
     }
+  } finally {
+    clearInterval(keepAlive);
   }
 }
 
