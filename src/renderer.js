@@ -148,6 +148,7 @@
   const ENGINE_LABELS = { local: "本地", google: "Google", bing: "Bing" };
   const translators = new Map();
   const installedLanguagePairs = new Set();
+  let availableLanguagePairsPromise;
   let detectorPromise;
   let currentSettings = { ...DEFAULT_SETTINGS };
   let lastDetectedLanguage = null;
@@ -166,7 +167,15 @@
       currentSettings = value;
       installedLanguagePairs.clear();
       for (const pair of value.downloadedLanguagePairs || []) installedLanguagePairs.add(pair);
-      if (await registerAvailableReversePairs()) {
+      let languagePairsChanged = false;
+      if (installedLanguagePairs.size === 0) {
+        for (const pair of await discoverAvailableLanguagePairs()) {
+          installedLanguagePairs.add(pair);
+          languagePairsChanged = true;
+        }
+      }
+      if (await registerAvailableReversePairs()) languagePairsChanged = true;
+      if (languagePairsChanged) {
         currentSettings = await call("saveSettings", {
           ...currentSettings,
           downloadedLanguagePairs: [...installedLanguagePairs],
@@ -207,6 +216,32 @@
 
   function languagePairKey(sourceLanguage, targetLanguage) {
     return `${localLanguage(sourceLanguage)}:${localLanguage(targetLanguage)}`;
+  }
+
+  function discoverAvailableLanguagePairs() {
+    if (!("Translator" in window) || typeof window.Translator.availability !== "function") {
+      return Promise.resolve([]);
+    }
+    if (!availableLanguagePairsPromise) {
+      const languages = [...new Set(
+        LANGUAGES.map(([language]) => localLanguage(language)).filter((language) => language !== "auto"),
+      )];
+      const checks = [];
+      for (const sourceLanguage of languages) {
+        for (const targetLanguage of languages) {
+          if (sourceLanguage === targetLanguage) continue;
+          checks.push(window.Translator.availability({ sourceLanguage, targetLanguage })
+            .then((availability) => availability === "available" ? `${sourceLanguage}:${targetLanguage}` : null)
+            .catch(() => null));
+        }
+      }
+      availableLanguagePairsPromise = withDeadline(
+        Promise.all(checks),
+        10000,
+        "自动检测本地翻译包超时",
+      ).then((pairs) => pairs.filter(Boolean)).catch(() => []);
+    }
+    return availableLanguagePairsPromise;
   }
 
   async function registerAvailableReversePairs() {
@@ -525,6 +560,12 @@
     result.textContent = "正在翻译…";
     copy.style.display = "none";
     try {
+      try {
+        await settingsPromise;
+      } catch {
+        settingsPromise = loadSettings();
+        await settingsPromise;
+      }
       const translationText = normalizeTranslationText(selectedText);
       const response = await translateWithConfiguredEngine(
         translationText,
@@ -787,7 +828,7 @@
   document.documentElement.appendChild(host);
 
   window[STATE_KEY] = {
-    version: "0.7.2",
+    version: "0.7.3",
     destroy() {
       disposed = true;
       clearTimeout(timer);
