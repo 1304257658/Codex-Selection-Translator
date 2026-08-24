@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import {
+  BING_TRANSLATOR_ORIGINS,
   bridgeBootstrap,
   DEFAULT_SETTINGS,
   bingLanguage,
@@ -10,6 +11,7 @@ import {
   parseBingAuth,
   parseBingResponse,
   parseGoogleResponse,
+  translateWithBing,
 } from "../src/hook.mjs";
 
 test("normalizes only supported settings", () => {
@@ -23,21 +25,33 @@ test("normalizes only supported settings", () => {
   assert.equal(value.targetLanguage, "ja");
   assert.equal(normalizeSettings({ engine: "model" }).engine, DEFAULT_SETTINGS.engine);
   assert.deepEqual(Object.keys(normalizeSettings({ googleApiKey: "legacy" })).sort(), [
-    "downloadedLanguagePairs",
+    "downloadedLanguages",
     "engine",
     "languageDetectorDownloaded",
+    "languagePacksInitialized",
     "sourceLanguage",
     "targetLanguage",
   ]);
 });
 
-test("normalizes managed local language packs", () => {
+test("normalizes independent managed local language packs", () => {
   const value = normalizeSettings({
-    downloadedLanguagePairs: ["en:zh", "en:zh", "auto:zh", "en:en", "invalid"],
+    downloadedLanguages: ["en", "zh", "en", "auto", "invalid:value", 42],
     languageDetectorDownloaded: true,
+    languagePacksInitialized: true,
   });
-  assert.deepEqual(value.downloadedLanguagePairs, ["en:zh"]);
+  assert.deepEqual(value.downloadedLanguages, ["en", "zh"]);
   assert.equal(value.languageDetectorDownloaded, true);
+  assert.equal(value.languagePacksInitialized, true);
+});
+
+test("migrates legacy directed language pairs to independent language packs", () => {
+  const value = normalizeSettings({
+    downloadedLanguagePairs: ["en:zh", "zh:en", "ja:zh", "auto:zh", "invalid"],
+    languagePacksInitialized: true,
+  });
+  assert.deepEqual(value.downloadedLanguages, ["en", "zh", "ja"]);
+  assert.equal("downloadedLanguagePairs" in value, false);
 });
 
 test("parses Google legacy segmented output", () => {
@@ -75,6 +89,42 @@ test("parses Bing web credentials and output", () => {
 test("maps Chinese codes for Bing Translator", () => {
   assert.equal(bingLanguage("zh-CN"), "zh-Hans");
   assert.equal(bingLanguage("zh-TW"), "zh-Hant");
+});
+
+test("falls back to the alternate Bing regional endpoint after a connect timeout", async () => {
+  const requests = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const requestUrl = String(url);
+    requests.push(requestUrl);
+    if (requestUrl === `${BING_TRANSLATOR_ORIGINS[0]}/translator`) {
+      const error = new TypeError("fetch failed");
+      error.cause = { code: "UND_ERR_CONNECT_TIMEOUT" };
+      throw error;
+    }
+    if (requestUrl === `${BING_TRANSLATOR_ORIGINS[1]}/translator`) {
+      const key = Date.now();
+      return new Response(`IG:"fallback-ig" data-iid="translator.1"; params_AbusePreventionHelper = [${key},"fallback-token",600000]`);
+    }
+    if (requestUrl.startsWith(`${BING_TRANSLATOR_ORIGINS[1]}/ttranslatev3?`)) {
+      return Response.json([{
+        detectedLanguage: { language: "en" },
+        translations: [{ text: "你好" }],
+      }]);
+    }
+    throw new Error(`unexpected request: ${requestUrl}`);
+  };
+  try {
+    assert.deepEqual(await translateWithBing("hello", {
+      sourceLanguage: "auto",
+      targetLanguage: "zh-CN",
+    }), { text: "你好", detectedLanguage: "en" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requests[0], `${BING_TRANSLATOR_ORIGINS[0]}/translator`);
+  assert.equal(requests[1], `${BING_TRANSLATOR_ORIGINS[1]}/translator`);
+  assert.match(requests[2], new RegExp(`^${BING_TRANSLATOR_ORIGINS[1]}/ttranslatev3\\?`));
 });
 
 test("normalizes compound identifiers before translation", () => {

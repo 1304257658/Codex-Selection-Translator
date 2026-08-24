@@ -1,7 +1,12 @@
+import { setDefaultResultOrder } from "node:dns";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+// The translator endpoints publish both address families, while some Windows
+// networks advertise IPv6 without providing a working external IPv6 route.
+setDefaultResultOrder("ipv4first");
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER_PATH = path.join(ROOT, "renderer.js");
@@ -17,7 +22,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   engine: "local",
   sourceLanguage: "auto",
   targetLanguage: "zh-CN",
-  downloadedLanguagePairs: [],
+  downloadedLanguages: [],
+  languagePacksInitialized: false,
   languageDetectorDownloaded: false,
 });
 
@@ -49,21 +55,38 @@ export function normalizeSettings(value = {}, current = DEFAULT_SETTINGS) {
     : ALLOWED_LANGUAGE.test(current.targetLanguage || "")
       ? current.targetLanguage
       : DEFAULT_SETTINGS.targetLanguage;
-  const pairSource = Array.isArray(value.downloadedLanguagePairs)
-    ? value.downloadedLanguagePairs
-    : Array.isArray(current.downloadedLanguagePairs) ? current.downloadedLanguagePairs : [];
-  const downloadedLanguagePairs = [...new Set(pairSource.filter((pair) => {
-    const match = typeof pair === "string" ? pair.match(ALLOWED_LANGUAGE_PAIR) : null;
-    return match && match[1] !== match[2];
-  }))].slice(0, 256);
+  const languageSource = Array.isArray(value.downloadedLanguages)
+    ? value.downloadedLanguages
+    : Array.isArray(value.downloadedLanguagePairs)
+      ? value.downloadedLanguagePairs.flatMap((pair) => {
+        const match = typeof pair === "string" ? pair.match(ALLOWED_LANGUAGE_PAIR) : null;
+        return match && match[1] !== match[2] ? [match[1], match[2]] : [];
+      })
+      : Array.isArray(current.downloadedLanguages)
+        ? current.downloadedLanguages
+        : Array.isArray(current.downloadedLanguagePairs)
+          ? current.downloadedLanguagePairs.flatMap((pair) => {
+            const match = typeof pair === "string" ? pair.match(ALLOWED_LANGUAGE_PAIR) : null;
+            return match && match[1] !== match[2] ? [match[1], match[2]] : [];
+          })
+          : [];
+  const downloadedLanguages = [...new Set(languageSource.filter((language) =>
+    typeof language === "string"
+      && language !== "auto"
+      && ALLOWED_LANGUAGE.test(language)
+  ))].slice(0, 256);
   const languageDetectorDownloaded = typeof value.languageDetectorDownloaded === "boolean"
     ? value.languageDetectorDownloaded
     : Boolean(current.languageDetectorDownloaded);
+  const languagePacksInitialized = typeof value.languagePacksInitialized === "boolean"
+    ? value.languagePacksInitialized
+    : Boolean(current.languagePacksInitialized);
   return {
     engine,
     sourceLanguage,
     targetLanguage,
-    downloadedLanguagePairs,
+    downloadedLanguages,
+    languagePacksInitialized,
     languageDetectorDownloaded,
   };
 }
@@ -143,7 +166,7 @@ export async function translateWithGoogle(text, settings) {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.7",
+        "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.8",
       },
       signal: withTimeout(),
     },
@@ -184,19 +207,48 @@ export function parseBingResponse(payload) {
   return { text, detectedLanguage: item.detectedLanguage?.language || "auto" };
 }
 
+export const BING_TRANSLATOR_ORIGINS = Object.freeze([
+  "https://cn.bing.com",
+  "https://www.bing.com",
+]);
+
 let bingAuth;
 let bingRequestCount = 0;
 
-async function getBingAuth(force = false) {
+function bingOrigins(excludedOrigin = "") {
+  const preferredOrigin = bingAuth?.origin;
+  return [...BING_TRANSLATOR_ORIGINS]
+    .sort((left, right) => (left === preferredOrigin ? -1 : right === preferredOrigin ? 1 : 0))
+    .filter((origin) => origin !== excludedOrigin);
+}
+
+async function getBingAuth(force = false, excludedOrigin = "") {
   if (!force && bingAuth?.expiresAt - Date.now() > 60_000) return bingAuth;
-  const response = await fetchTranslationService("Bing", "https://www.bing.com/translator", {
-    headers: { "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.7" },
-    signal: withTimeout(),
-  });
-  if (!response.ok) throw new Error(`Bing 翻译页面返回 HTTP ${response.status}`);
-  bingAuth = parseBingAuth(await response.text());
-  bingRequestCount = 0;
-  return bingAuth;
+  const failures = [];
+  const origins = bingOrigins(excludedOrigin);
+  const requestAuth = async (origin) => {
+    try {
+      const response = await fetchTranslationService("Bing", `${origin}/translator`, {
+        headers: { "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.8" },
+        signal: withTimeout(8000),
+      });
+      if (!response.ok) throw new Error(`Bing 翻译页面返回 HTTP ${response.status}`);
+      return { ...parseBingAuth(await response.text()), origin };
+    } catch (error) {
+      throw new Error(`${new URL(origin).host}：${error?.message || error}`);
+    }
+  };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      bingAuth = await Promise.any(origins.map(requestAuth));
+      bingRequestCount = 0;
+      return bingAuth;
+    } catch (error) {
+      failures.push(...(error?.errors || [error]).map((failure) => failure?.message || String(failure)));
+    }
+  }
+  bingAuth = undefined;
+  throw new Error(`Bing 翻译入口均不可用（${failures.join("；")}）`);
 }
 
 export async function translateWithBing(text, settings, retry = true) {
@@ -215,15 +267,27 @@ export async function translateWithBing(text, settings, retry = true) {
     key: String(auth.key),
     token: auth.token,
   });
-  const response = await fetchTranslationService("Bing", `https://www.bing.com/ttranslatev3?${query}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.7",
-    },
-    body,
-    signal: withTimeout(),
-  });
+  const requestTranslation = () => fetchTranslationService("Bing", `${auth.origin}/ttranslatev3?${query}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 CodexSelectionTranslator/0.8",
+      },
+      body,
+      signal: withTimeout(12000),
+    });
+  let response;
+  try {
+    response = await requestTranslation();
+  } catch (error) {
+    if (!retry) throw error;
+    try {
+      response = await requestTranslation();
+    } catch {
+      await getBingAuth(true, auth.origin);
+      return translateWithBing(text, settings, false);
+    }
+  }
   if (retry && (response.status === 401 || response.status === 403)) {
     await getBingAuth(true);
     return translateWithBing(text, settings, false);
@@ -356,7 +420,7 @@ export function bridgeBootstrap(rendererSource) {
   };
   window.__codexTranslatorCall = (action, payload = {}) => new Promise((resolve, reject) => {
     const id = crypto.randomUUID();
-    const timeoutMs = action === "translateRemote" ? 45000 : 5000;
+    const timeoutMs = action === "translateRemote" ? 90000 : 5000;
     const timeout = setTimeout(() => {
       window.__codexTranslatorCallbacks.delete(id);
       reject(new Error("翻译后端未响应，请重新启动 Codex Selection Translator"));

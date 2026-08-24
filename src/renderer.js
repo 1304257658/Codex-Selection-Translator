@@ -20,7 +20,8 @@
     engine: "local",
     sourceLanguage: "auto",
     targetLanguage: "zh-CN",
-    downloadedLanguagePairs: [],
+    downloadedLanguages: [],
+    languagePacksInitialized: false,
     languageDetectorDownloaded: false,
   };
 
@@ -66,9 +67,12 @@
       .original { margin-top:8px; color:#9aa0a6; font-size:12px; overflow-wrap:anywhere; }
       .result { margin-top:10px; font-size:16px; white-space:pre-wrap; overflow-wrap:anywhere; }
       .loading { color:#9aa0a6; } .error { color:#f28b82; }
-      .foot { display:flex; justify-content:flex-end; margin-top:10px; }
-      .copy { padding:6px 9px; border:0; border-radius:8px; background:transparent; color:#bdc1c6; cursor:pointer; }
-      .copy:hover { background:rgba(255,255,255,.08); color:#fff; }
+      .foot { display:flex; justify-content:flex-end; gap:4px; margin-top:10px; }
+      .symbol-button {
+        width:32px; height:32px; padding:0; border:0; border-radius:8px;
+        background:transparent; color:#bdc1c6; cursor:pointer; font-size:19px; line-height:1;
+      }
+      .symbol-button:hover { background:rgba(255,255,255,.08); color:#fff; }
       #settings { display:none; }
       .field { display:grid; gap:5px; margin-top:12px; }
       label { color:#bdc1c6; font-size:12px; }
@@ -83,11 +87,51 @@
       .primary { border:0; background:#8ab4f8; color:#172033; font-weight:650; }
       .secondary { border:1px solid #4a4d51; background:transparent; color:#bdc1c6; }
       .status { min-height:18px; margin-top:8px; color:#81c995; font-size:12px; }
-      .pack-manager { margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,.12); }
-      .pack-title { color:#f1f3f4; font-size:12px; font-weight:650; }
-      .pack-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
-      .pack-actions button { flex:1; }
+      #pack-backdrop {
+        position:fixed; inset:0; display:none; background:rgba(7,9,12,.62);
+        backdrop-filter:blur(2px); pointer-events:auto;
+      }
+      #pack-manager {
+        position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); display:none;
+        width:min(720px,calc(100vw - 32px)); max-height:min(620px,calc(100vh - 32px));
+        overflow:hidden; padding:18px; border:1px solid rgba(255,255,255,.16); border-radius:16px;
+        background:#202124; color:#f1f3f4; box-shadow:0 26px 80px rgba(0,0,0,.52);
+        pointer-events:auto; font:14px/1.5 system-ui,sans-serif;
+      }
+      .pack-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+      .pack-heading .title { font-size:15px; color:#f1f3f4; }
+      .pack-subtitle { margin-top:2px; color:#9aa0a6; font-size:12px; }
+      .pack-note {
+        margin:14px 0 0; padding:10px 12px; border-left:3px solid #8ab4f8;
+        border-radius:0 8px 8px 0; background:rgba(138,180,248,.08); color:#bdc1c6; font-size:12px;
+      }
+      .pack-delete { border:1px solid rgba(242,139,130,.5); background:transparent; color:#f28b82; }
+      .pack-delete:hover:not(:disabled) { background:rgba(242,139,130,.1); }
+      #pack-manager-status { min-height:22px; margin-top:10px; color:#81c995; font-size:12px; }
+      .pack-list-heading {
+        display:flex; align-items:center; justify-content:space-between; margin-top:12px;
+        padding-top:14px; border-top:1px solid rgba(255,255,255,.12);
+      }
+      .pack-list-title { font-weight:650; }
+      #pack-count { color:#9aa0a6; font-size:12px; }
+      #language-pack-list { max-height:390px; overflow:auto; margin-top:8px; padding-right:4px; }
+      .pack-row {
+        display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:10px;
+        min-height:48px; padding:7px 8px; border-radius:10px;
+      }
+      .pack-row:hover { background:rgba(255,255,255,.045); }
+      .pack-language { min-width:0; }
+      .pack-language-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .pack-language-code { color:#9aa0a6; font:11px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace; }
+      .pack-ready { color:#81c995; font-size:12px; }
+      .pack-missing { color:#9aa0a6; font-size:12px; }
+      .pack-row button { min-height:30px; padding:4px 9px; border-radius:8px; cursor:pointer; }
+      .pack-empty { padding:28px 8px; color:#9aa0a6; text-align:center; }
+      button:focus-visible, select:focus-visible { outline:2px solid #8ab4f8; outline-offset:2px; }
       button:disabled, select:disabled { opacity:.5; cursor:default; }
+      @media (max-width:640px) {
+        #pack-manager { overflow:auto; }
+      }
     </style>
     <div id="actions">
       <button id="translate" type="button" aria-label="翻译所选文本" title="翻译">译</button>
@@ -96,6 +140,7 @@
       <div class="head">
         <div class="title">划词翻译</div>
         <div class="head-actions">
+          <button class="icon" id="open-packs" type="button" aria-label="语言包管理" title="语言包管理">⇩</button>
           <button class="icon" id="open-settings" type="button" aria-label="翻译设置">⚙</button>
           <button class="icon" id="close" type="button" aria-label="关闭">×</button>
         </div>
@@ -108,23 +153,25 @@
       <div id="translation-view">
         <div class="original"></div>
         <div class="result"></div>
-        <div class="foot"><button class="copy" type="button">复制译文</button></div>
+        <div class="foot"><button class="retry symbol-button" type="button" aria-label="重试翻译" title="重试翻译">↻</button><button class="copy symbol-button" type="button" aria-label="复制译文" title="复制译文">⧉</button></div>
       </div>
       <form id="settings">
         <div class="field"><label for="engine">翻译引擎</label><select id="engine"><option value="local">本地翻译（推荐）</option><option value="google">Google Translate</option><option value="bing">Bing Translate</option></select></div>
         <div class="hint" id="engine-hint"></div>
-        <div class="pack-manager" id="local-pack-settings">
-          <div class="pack-title">本地语言包</div>
-          <div class="hint">使用上方默认源语言和目标语言检查、下载翻译包。</div>
-          <div class="pack-actions">
-            <button class="secondary" id="download-pack" type="button">下载翻译包</button>
-            <button class="secondary" id="download-detector" type="button">下载自动检测包（可选）</button>
-          </div>
-          <div class="hint" id="pack-status">请选择语言对后下载。</div>
-        </div>
         <div class="settings-actions"><button class="secondary" id="back-settings" type="button">返回</button><button class="primary" type="submit">保存设置</button></div>
         <div class="status"></div>
       </form>
+    </section>
+    <div id="pack-backdrop"></div>
+    <section id="pack-manager" role="dialog" aria-modal="true" aria-label="语言包管理">
+      <div class="pack-heading">
+        <div><div class="title">语言包管理</div><div class="pack-subtitle">每种语言独立管理；翻译页只显示已下载的语言。</div></div>
+        <button class="icon" id="close-packs" type="button" aria-label="关闭语言包管理" title="关闭">×</button>
+      </div>
+      <p class="pack-note">首次启动会检测 Chromium 本地已有语言资源。“删除”会让该语言从翻译页消失并释放相关会话；Chromium 暂不提供网页 API 删除磁盘缓存。</p>
+      <div id="pack-manager-status" role="status" aria-live="polite"></div>
+      <div class="pack-list-heading"><div class="pack-list-title">语言包</div><div id="pack-count"></div></div>
+      <div id="language-pack-list"></div>
     </section>`;
 
   const $ = (selector) => shadow.querySelector(selector);
@@ -140,15 +187,19 @@
   const target = $("#target");
   const swapLanguages = $("#swap-languages");
   const engineHint = $("#engine-hint");
-  const localPackSettings = $("#local-pack-settings");
-  const downloadPack = $("#download-pack");
-  const downloadDetector = $("#download-detector");
-  const packStatus = $("#pack-status");
   const status = $(".status");
+  const retry = $(".retry");
+  const packBackdrop = $("#pack-backdrop");
+  const packManager = $("#pack-manager");
+  const packManagerStatus = $("#pack-manager-status");
+  const languagePackList = $("#language-pack-list");
+  const packCount = $("#pack-count");
   const ENGINE_LABELS = { local: "本地", google: "Google", bing: "Bing" };
   const translators = new Map();
-  const installedLanguagePairs = new Set();
-  let availableLanguagePairsPromise;
+  const installedLanguages = new Set();
+  const downloadingLanguages = new Set();
+  const languagePackProgress = new Map();
+  let availableLanguagePacksPromise;
   let detectorPromise;
   let currentSettings = { ...DEFAULT_SETTINGS };
   let lastDetectedLanguage = null;
@@ -165,26 +216,32 @@
   function loadSettings() {
     const pending = call("loadSettings").then(async (value) => {
       currentSettings = value;
-      installedLanguagePairs.clear();
-      for (const pair of value.downloadedLanguagePairs || []) installedLanguagePairs.add(pair);
-      let languagePairsChanged = false;
-      if (installedLanguagePairs.size === 0) {
-        for (const pair of await discoverAvailableLanguagePairs()) {
-          installedLanguagePairs.add(pair);
-          languagePairsChanged = true;
+      installedLanguages.clear();
+      const storedLanguages = Array.isArray(value.downloadedLanguages)
+        ? value.downloadedLanguages
+        : (value.downloadedLanguagePairs || []).flatMap((pair) =>
+          typeof pair === "string" ? pair.split(":") : []
+        );
+      for (const language of storedLanguages) {
+        installedLanguages.add(localLanguage(language));
+      }
+      let languagePacksChanged = false;
+      if (!value.languagePacksInitialized) {
+        for (const language of await discoverAvailableLanguagePacks()) {
+          installedLanguages.add(language);
+          languagePacksChanged = true;
         }
       }
-      if (await registerAvailableReversePairs()) languagePairsChanged = true;
-      if (languagePairsChanged) {
+      if (languagePacksChanged || !value.languagePacksInitialized) {
         currentSettings = await call("saveSettings", {
           ...currentSettings,
-          downloadedLanguagePairs: [...installedLanguagePairs],
+          downloadedLanguages: [...installedLanguages],
+          languagePacksInitialized: true,
         });
       }
       engine.value = currentSettings.engine;
       refreshQuickLanguageOptions(currentSettings.sourceLanguage, currentSettings.targetLanguage);
       refreshEngineFields();
-      refreshPackStatus();
       updateSwapState();
       return currentSettings;
     });
@@ -214,53 +271,31 @@
     return language;
   }
 
-  function languagePairKey(sourceLanguage, targetLanguage) {
-    return `${localLanguage(sourceLanguage)}:${localLanguage(targetLanguage)}`;
-  }
-
-  function discoverAvailableLanguagePairs() {
+  function discoverAvailableLanguagePacks() {
     if (!("Translator" in window) || typeof window.Translator.availability !== "function") {
       return Promise.resolve([]);
     }
-    if (!availableLanguagePairsPromise) {
+    if (!availableLanguagePacksPromise) {
       const languages = [...new Set(
         LANGUAGES.map(([language]) => localLanguage(language)).filter((language) => language !== "auto"),
-      )];
-      const checks = [];
-      for (const sourceLanguage of languages) {
-        for (const targetLanguage of languages) {
-          if (sourceLanguage === targetLanguage) continue;
-          checks.push(window.Translator.availability({ sourceLanguage, targetLanguage })
-            .then((availability) => availability === "available" ? `${sourceLanguage}:${targetLanguage}` : null)
-            .catch(() => null));
-        }
-      }
-      availableLanguagePairsPromise = withDeadline(
+      )].filter((language) => language !== "en");
+      const checks = languages.map(async (language) => {
+        const availability = await Promise.all([
+          window.Translator.availability({ sourceLanguage: "en", targetLanguage: language }),
+          window.Translator.availability({ sourceLanguage: language, targetLanguage: "en" }),
+        ].map((request) => Promise.resolve(request).catch(() => "unavailable")));
+        return availability.includes("available") ? language : null;
+      });
+      availableLanguagePacksPromise = withDeadline(
         Promise.all(checks),
         10000,
         "自动检测本地翻译包超时",
-      ).then((pairs) => pairs.filter(Boolean)).catch(() => []);
+      ).then((detectedLanguages) => {
+        const available = detectedLanguages.filter(Boolean);
+        return available.length ? ["en", ...available] : [];
+      }).catch(() => []);
     }
-    return availableLanguagePairsPromise;
-  }
-
-  async function registerAvailableReversePairs() {
-    if (!("Translator" in window) || typeof window.Translator.availability !== "function") return false;
-    let changed = false;
-    for (const pair of [...installedLanguagePairs]) {
-      const [sourceLanguage, targetLanguage] = pair.split(":");
-      const reverseKey = `${targetLanguage}:${sourceLanguage}`;
-      if (installedLanguagePairs.has(reverseKey)) continue;
-      const availability = await window.Translator.availability({
-        sourceLanguage: targetLanguage,
-        targetLanguage: sourceLanguage,
-      }).catch(() => "unavailable");
-      if (availability === "available") {
-        installedLanguagePairs.add(reverseKey);
-        changed = true;
-      }
-    }
-    return changed;
+    return availableLanguagePacksPromise;
   }
 
   function setLanguageOptions(select, entries, preferredValue, emptyLabel) {
@@ -279,83 +314,38 @@
   }
 
   function refreshSettingsLanguageOptions() {
-    const concreteLanguages = LANGUAGES.filter(([value]) => value !== "auto");
-    setLanguageOptions(source, LANGUAGES, currentSettings.sourceLanguage, "没有可用语言");
-    setLanguageOptions(target, concreteLanguages, currentSettings.targetLanguage, "没有可用语言");
-    updateSwapState();
+    refreshQuickLanguageOptions(currentSettings.sourceLanguage, currentSettings.targetLanguage);
   }
 
   function refreshQuickLanguageOptions(
     preferredSource = source.value,
     preferredTarget = target.value,
-    changedSide = "",
   ) {
     const concreteLanguages = LANGUAGES.filter(([value]) => value !== "auto");
-    if (currentSettings.engine !== "local") {
-      setLanguageOptions(source, LANGUAGES, preferredSource || currentSettings.sourceLanguage, "没有可用语言");
-      setLanguageOptions(target, concreteLanguages, preferredTarget || currentSettings.targetLanguage, "没有可用语言");
-      updateSwapState();
-      return;
-    }
-
-    const hasPair = (from, to) => installedLanguagePairs.has(languagePairKey(from, to));
-    const sourceEntries = concreteLanguages.filter(([from]) =>
-      concreteLanguages.some(([to]) => from !== to && hasPair(from, to))
+    const installedEntries = concreteLanguages.filter(([value]) =>
+      installedLanguages.has(localLanguage(value))
     );
-    const targetEntries = concreteLanguages.filter(([to]) =>
-      concreteLanguages.some(([from]) => from !== to && hasPair(from, to))
-    );
-    const quickSourceEntries = sourceEntries.length
-      ? [["auto", "自动检测"], ...sourceEntries]
-      : [];
-    const selectedSource = setLanguageOptions(
-      source,
-      quickSourceEntries,
-      preferredSource || currentSettings.sourceLanguage,
-      "请先下载语言包",
-    );
-    const selectedTarget = setLanguageOptions(
-      target,
-      targetEntries,
-      preferredTarget || currentSettings.targetLanguage,
-      "请先下载语言包",
-    );
-    if (selectedSource && selectedTarget && selectedSource !== "auto" && !hasPair(selectedSource, selectedTarget)) {
-      if (changedSide === "target") {
-        source.value = "auto";
-      } else {
-        const compatibleTarget = targetEntries.find(([to]) => hasPair(selectedSource, to))?.[0];
-        if (compatibleTarget) target.value = compatibleTarget;
-        else source.value = "auto";
-      }
-    }
+    const activeEngine = engine.value || currentSettings.engine;
+    const sourceEntries = activeEngine === "local"
+      ? installedEntries.length ? [["auto", "自动检测"], ...installedEntries] : []
+      : LANGUAGES;
+    const targetEntries = activeEngine === "local" ? installedEntries : concreteLanguages;
+    const sourceValue = sourceEntries.some(([value]) => value === preferredSource)
+      ? preferredSource
+      : currentSettings.sourceLanguage;
+    const targetValue = targetEntries.some(([value]) => value === preferredTarget)
+      ? preferredTarget
+      : currentSettings.targetLanguage;
+    setLanguageOptions(source, sourceEntries, sourceValue, "请先下载语言包");
+    setLanguageOptions(target, targetEntries, targetValue, "请先下载语言包");
     updateSwapState();
-  }
-
-  function refreshPackStatus(message = "") {
-    const automaticSource = source.value === "auto";
-    const key = automaticSource ? "" : languagePairKey(source.value, target.value);
-    const pairReady = Boolean(key) && installedLanguagePairs.has(key);
-    const sameLanguage = !automaticSource && localLanguage(source.value) === localLanguage(target.value);
-    downloadPack.disabled = automaticSource || sameLanguage;
-    downloadPack.textContent = pairReady ? "重新验证翻译包" : "下载翻译包";
-    downloadDetector.textContent = currentSettings.languageDetectorDownloaded
-      ? "重新验证自动检测包（可选）"
-      : "下载自动检测包（可选）";
-    packStatus.textContent = message || (automaticSource
-      ? "自动检测包只负责提升源语言识别；未安装时仍会使用轻量规则识别。下载翻译包前请先选择具体源语言。"
-      : sameLanguage
-      ? "源语言和目标语言不能相同。"
-      : pairReady ? "该翻译语言对已安装。" : "该翻译语言对尚未安装。");
   }
 
   function updateSwapState() {
     const reverseTarget = source.value === "auto" ? lastDetectedLanguage : source.value;
     swapLanguages.disabled = !reverseTarget
       || reverseTarget === target.value
-      || (currentSettings.engine === "local"
-        ? !installedLanguagePairs.has(languagePairKey(target.value, reverseTarget))
-        : !LANGUAGES.some(([language]) => language === reverseTarget && language !== "auto"));
+      || !LANGUAGES.some(([language]) => language === reverseTarget && language !== "auto");
   }
 
   function guessLanguage(text) {
@@ -372,34 +362,63 @@
     return LANGUAGES.find(([value]) => value === uiLanguage(language))?.[1] || language;
   }
 
-  function updatePackProgress(label, event) {
-    if (!Number.isFinite(event?.loaded)) {
-      packStatus.textContent = `${label}：正在开始下载…`;
-      return;
+  function updatePackProgress(language, event) {
+    const label = languageName(language);
+    const percentage = Number.isFinite(event?.loaded)
+      ? Math.max(0, Math.floor(event.loaded * 100))
+      : null;
+    languagePackProgress.set(language, percentage);
+    const message = percentage === null
+      ? `${label} 语言包：正在开始下载…`
+      : percentage >= 100
+        ? `${label} 语言包：下载完成，正在初始化…`
+        : `${label} 语言包：正在下载… ${percentage}%`;
+    if (packManager.style.display === "block") {
+      packManagerStatus.textContent = message;
+      packManagerStatus.className = "";
+      renderPackManager();
     }
-    if (event.loaded >= 1) {
-      packStatus.textContent = `${label}：下载完成，正在初始化…`;
-      return;
-    }
-    const percentage = Math.max(0, Math.floor(event.loaded * 100));
-    packStatus.textContent = `${label}：正在下载… ${percentage}%`;
   }
 
-  async function detectLanguage(text) {
+  function ensureLanguageDetector() {
     if (!("LanguageDetector" in window)) throw new Error("当前 Codex 不支持本地语言检测");
-    if (!currentSettings.languageDetectorDownloaded) {
-      throw new Error("尚未下载本地语言检测包");
-    }
     if (!detectorPromise) {
-      const availability = await window.LanguageDetector.availability();
-      if (availability !== "available") throw new Error("本地语言检测包需要在设置中重新下载");
-      detectorPromise = withDeadline(window.LanguageDetector.create(), 30000, "本地语言检测器初始化超时").catch((error) => {
+      detectorPromise = withDeadline(
+        window.LanguageDetector.create(),
+        180000,
+        "本地语言检测包下载超时",
+      ).then(async (detector) => {
+        if (!currentSettings.languageDetectorDownloaded) {
+          currentSettings = {
+            ...currentSettings,
+            languageDetectorDownloaded: true,
+          };
+          const saved = await call("saveSettings", currentSettings).catch(() => currentSettings);
+          currentSettings = saved;
+          settingsPromise = Promise.resolve(saved);
+        }
+        return detector;
+      }).catch((error) => {
         detectorPromise = undefined;
         throw error;
       });
     }
+    return detectorPromise;
+  }
+
+  async function detectLanguage(text) {
+    const pendingDetector = ensureLanguageDetector();
+    if (!currentSettings.languageDetectorDownloaded) {
+      pendingDetector.catch(() => {});
+      throw new Error("本地语言检测包正在后台下载");
+    }
+    const detector = await withDeadline(
+      pendingDetector,
+      30000,
+      "本地语言检测器初始化超时",
+    );
     const detected = await withDeadline(
-      (await detectorPromise).detect(text),
+      detector.detect(text),
       20000,
       "本地语言检测超时",
     );
@@ -408,21 +427,38 @@
     return localLanguage(language);
   }
 
+  async function persistInstalledLanguages() {
+    const nextSettings = {
+      ...currentSettings,
+      downloadedLanguages: [...installedLanguages],
+      languagePacksInitialized: true,
+    };
+    const saved = await call("saveSettings", nextSettings);
+    currentSettings = saved;
+    settingsPromise = Promise.resolve(saved);
+  }
+
   async function getTranslator(sourceLanguage, targetLanguage) {
     if (!("Translator" in window)) throw new Error("当前 Codex 不支持本地翻译");
     const key = `${sourceLanguage}:${targetLanguage}`;
-    if (!installedLanguagePairs.has(key)) {
-      throw new Error(`请先在设置中下载 ${languageName(sourceLanguage)} → ${languageName(targetLanguage)} 翻译包`);
-    }
     if (!translators.has(key)) {
-      const availability = await window.Translator.availability({ sourceLanguage, targetLanguage });
-      if (availability !== "available") {
-        installedLanguagePairs.delete(key);
-        refreshQuickLanguageOptions();
-        throw new Error(`${languageName(sourceLanguage)} → ${languageName(targetLanguage)} 翻译包需要在设置中重新下载`);
-      }
-      const translator = withDeadline(window.Translator.create({ sourceLanguage, targetLanguage }), 30000, "本地翻译器初始化超时").catch((error) => {
+      const translator = withDeadline(window.Translator.create({
+        sourceLanguage,
+        targetLanguage,
+        monitor(monitor) {
+          monitor.addEventListener("downloadprogress", (event) => {
+            if (translationView.style.display !== "none") {
+              const percentage = Number.isFinite(event?.loaded)
+                ? `${Math.max(0, Math.floor(event.loaded * 100))}%`
+                : "正在准备";
+              result.className = "result loading";
+              result.textContent = `${languageName(sourceLanguage)} → ${languageName(targetLanguage)}：${percentage}`;
+            }
+          });
+        },
+      }), 180000, "本地翻译器初始化超时").catch((error) => {
         translators.delete(key);
+        refreshQuickLanguageOptions(source.value, target.value);
         throw error;
       });
       translators.set(key, translator);
@@ -441,17 +477,16 @@
     const detectedLanguagePromise = shouldDetect
       ? detectLanguage(text)
       : Promise.resolve(guessedLanguage);
-    const guessedTranslatorPromise = guessedLanguage === targetLanguage
-      ? null
-      : getTranslator(guessedLanguage, targetLanguage);
-    guessedTranslatorPromise?.catch(() => {});
     const sourceLanguage = localLanguage(await detectedLanguagePromise.catch(() => guessedLanguage));
+    const missingLanguages = [...new Set([sourceLanguage, targetLanguage])]
+      .filter((language) => !installedLanguages.has(language));
+    if (missingLanguages.length) {
+      throw new Error(`请先在语言包管理中下载：${missingLanguages.map(languageName).join("、")}`);
+    }
     if (sourceLanguage === targetLanguage) {
       return { text, detectedLanguage: sourceLanguage, engine: "local", targetLanguage: settings.targetLanguage };
     }
-    const translator = await (sourceLanguage === guessedLanguage && guessedTranslatorPromise
-      ? guessedTranslatorPromise
-      : getTranslator(sourceLanguage, targetLanguage));
+    const translator = await getTranslator(sourceLanguage, targetLanguage);
     return {
       text: await withDeadline(translator.translate(text), 30000, "本地翻译超时"),
       detectedLanguage: sourceLanguage,
@@ -534,6 +569,8 @@
   function closeAll() {
     actions.style.display = "none";
     card.style.display = "none";
+    packBackdrop.style.display = "none";
+    packManager.style.display = "none";
   }
 
   function showCard() {
@@ -543,10 +580,10 @@
   }
 
   function showTranslationView() {
-    refreshQuickLanguageOptions(currentSettings.sourceLanguage, currentSettings.targetLanguage);
     showCard();
     settingsView.style.display = "none";
     translationView.style.display = "block";
+    refreshQuickLanguageOptions(currentSettings.sourceLanguage, currentSettings.targetLanguage);
     status.textContent = "";
     $(".title").textContent = translationTitle;
   }
@@ -559,6 +596,7 @@
     result.className = "result loading";
     result.textContent = "正在翻译…";
     copy.style.display = "none";
+    retry.style.display = "none";
     try {
       try {
         await settingsPromise;
@@ -566,10 +604,17 @@
         settingsPromise = loadSettings();
         await settingsPromise;
       }
+      if (!source.value || !target.value) {
+        throw new Error("请先在语言包管理中下载至少两种需要的语言");
+      }
       const translationText = normalizeTranslationText(selectedText);
       const response = await translateWithConfiguredEngine(
         translationText,
-        currentSettings,
+        {
+          ...currentSettings,
+          sourceLanguage: source.value,
+          targetLanguage: target.value,
+        },
         translationText !== selectedText.trim(),
       );
       translatedText = response.text;
@@ -580,17 +625,19 @@
       result.className = "result";
       result.textContent = translatedText;
       copy.style.display = "block";
+      retry.style.display = "block";
     } catch (error) {
       result.className = "result error";
       result.textContent = error?.message || String(error);
+      retry.style.display = "block";
     }
   }
 
   function refreshEngineFields() {
     engineHint.textContent = engine.value === "local"
-      ? "在 Codex 内嵌 Chromium 中本地翻译；请在下方预先下载需要的语言包。失败时自动尝试 Bing 和 Google。"
+      ? "在 Codex 内嵌 Chromium 中本地翻译；翻译页只显示语言包管理中已下载的语言，切换语言不会下载。"
       : `${ENGINE_LABELS[engine.value]} 使用免 Key 网页接口，可能受到服务变更或限流影响。`;
-    localPackSettings.style.display = engine.value === "local" ? "block" : "none";
+    refreshQuickLanguageOptions(source.value, target.value);
   }
 
   async function saveQuickLanguages(retranslate = true) {
@@ -628,91 +675,145 @@
     await saveQuickLanguages();
   }
 
-  async function downloadLocalLanguagePair() {
-    if (!("Translator" in window)) {
-      refreshPackStatus("当前 Codex 不支持本地翻译语言包。");
-      return;
-    }
-    const selectedSourceLanguage = source.value;
-    const selectedTargetLanguage = target.value;
-    const sourceLanguage = localLanguage(selectedSourceLanguage);
-    const targetLanguage = localLanguage(selectedTargetLanguage);
-    if (!sourceLanguage || !targetLanguage || sourceLanguage === targetLanguage) return;
-    const key = `${sourceLanguage}:${targetLanguage}`;
-    downloadPack.disabled = true;
-    packStatus.textContent = "翻译包：正在请求 Chromium 下载…";
-    try {
-      const translator = await withDeadline(window.Translator.create({
-        sourceLanguage,
-        targetLanguage,
-        monitor(monitor) {
-          monitor.addEventListener("downloadprogress", (event) => updatePackProgress("翻译包", event));
-        },
-      }), 180000, "本地翻译包下载超时");
-      translators.set(key, Promise.resolve(translator));
-      installedLanguagePairs.add(key);
-      const reverseKey = `${targetLanguage}:${sourceLanguage}`;
-      const reverseAvailability = await window.Translator.availability({
-        sourceLanguage: targetLanguage,
-        targetLanguage: sourceLanguage,
-      }).catch(() => "unavailable");
-      if (reverseAvailability === "available") installedLanguagePairs.add(reverseKey);
-      const saved = await call("saveSettings", {
-        ...currentSettings,
-        sourceLanguage: selectedSourceLanguage,
-        targetLanguage: selectedTargetLanguage,
-        downloadedLanguagePairs: [...installedLanguagePairs],
-      });
-      currentSettings = saved;
-      settingsPromise = Promise.resolve(saved);
-      refreshSettingsLanguageOptions();
-      const direction = reverseAvailability === "available" ? "↔" : "→";
-      refreshPackStatus(`${languageName(sourceLanguage)} ${direction} ${languageName(targetLanguage)} 翻译包已安装。`);
-    } catch (error) {
-      refreshPackStatus(error?.message || String(error));
-    } finally {
-      downloadPack.disabled = sourceLanguage === targetLanguage;
+  function setPackManagerStatus(message = "", isError = false) {
+    packManagerStatus.textContent = message;
+    packManagerStatus.className = isError ? "error" : "";
+  }
+
+  function renderPackManager() {
+    const entries = LANGUAGES.filter(([value]) => value !== "auto");
+    packCount.textContent = `${installedLanguages.size} / ${entries.length} 个已下载`;
+    languagePackList.replaceChildren();
+    for (const [uiLanguageCode, label] of entries) {
+      const language = localLanguage(uiLanguageCode);
+      const isInstalled = installedLanguages.has(language);
+      const isDownloading = downloadingLanguages.has(language);
+      const row = document.createElement("div");
+      row.className = "pack-row";
+      const languageDetails = document.createElement("div");
+      languageDetails.className = "pack-language";
+      const name = document.createElement("div");
+      name.className = "pack-language-name";
+      name.textContent = label;
+      const code = document.createElement("div");
+      code.className = "pack-language-code";
+      code.textContent = language;
+      languageDetails.append(name, code);
+      const state = document.createElement("div");
+      state.className = isInstalled ? "pack-ready" : "pack-missing";
+      state.textContent = isInstalled ? "已下载" : isDownloading ? "下载中" : "未下载";
+      const action = document.createElement("button");
+      action.type = "button";
+      action.dataset.language = language;
+      action.dataset.action = isInstalled ? "delete" : "download";
+      action.className = isInstalled ? "pack-delete" : "primary";
+      action.disabled = isDownloading;
+      const progress = languagePackProgress.get(language);
+      action.textContent = isInstalled
+        ? "删除"
+        : isDownloading
+          ? Number.isFinite(progress) ? `${progress}%` : "下载中…"
+          : "下载";
+      row.append(languageDetails, state, action);
+      languagePackList.appendChild(row);
     }
   }
 
-  async function downloadLanguageDetector() {
-    if (!("LanguageDetector" in window)) {
-      refreshPackStatus("当前 Codex 不支持本地语言检测包。");
+  function managedDownloadDirection(language) {
+    if (language !== "en") return { sourceLanguage: "en", targetLanguage: language };
+    const preferredLanguages = [
+      localLanguage(currentSettings.targetLanguage),
+      ...installedLanguages,
+      ...LANGUAGES.map(([value]) => localLanguage(value)),
+    ];
+    const targetLanguage = preferredLanguages.find((candidate) =>
+      candidate && candidate !== "auto" && candidate !== "en"
+    ) || "zh";
+    return { sourceLanguage: "en", targetLanguage };
+  }
+
+  async function showPackManager() {
+    packBackdrop.style.display = "block";
+    packManager.style.display = "block";
+    setPackManagerStatus("正在读取语言包记录…");
+    try {
+      await settingsPromise;
+      renderPackManager();
+      setPackManagerStatus();
+      languagePackList.querySelector("button")?.focus();
+    } catch (error) {
+      setPackManagerStatus(error?.message || String(error), true);
+    }
+  }
+
+  function closePackManager() {
+    packBackdrop.style.display = "none";
+    packManager.style.display = "none";
+    $("#open-packs").focus();
+  }
+
+  async function downloadManagedLanguage(language) {
+    if (!language || installedLanguages.has(language) || downloadingLanguages.has(language)) return;
+    if (!("Translator" in window)) {
+      setPackManagerStatus("当前 Codex 不支持本地翻译语言包。", true);
       return;
     }
-    downloadDetector.disabled = true;
-    packStatus.textContent = "自动检测包：正在请求 Chromium 下载…";
-    let progressSeen = false;
-    let lastProgress = 0;
-    const stalledTimer = setTimeout(() => {
-      packStatus.textContent = progressSeen
-        ? `自动检测包：进度暂未变化（${lastProgress}%），Chromium 可能正在下载、校验或解压…`
-        : "自动检测包：仍在等待 Chromium 启动下载，请检查网络或稍后重试。";
-    }, 10000);
+    const direction = managedDownloadDirection(language);
+    const key = `${direction.sourceLanguage}:${direction.targetLanguage}`;
+    downloadingLanguages.add(language);
+    languagePackProgress.delete(language);
+    setPackManagerStatus(`${languageName(language)}：正在请求 Chromium 下载…`);
+    renderPackManager();
     try {
-      const detector = await withDeadline(window.LanguageDetector.create({
-        monitor(monitor) {
-          monitor.addEventListener("downloadprogress", (event) => {
-            progressSeen = true;
-            if (Number.isFinite(event?.loaded)) lastProgress = Math.max(0, Math.floor(event.loaded * 100));
-            updatePackProgress("自动检测包", event);
-          });
-        },
-      }), 180000, "本地语言检测包下载超时");
-      detectorPromise = Promise.resolve(detector);
-      const saved = await call("saveSettings", {
-        ...currentSettings,
-        languageDetectorDownloaded: true,
-      });
-      currentSettings = saved;
-      settingsPromise = Promise.resolve(saved);
-      refreshPackStatus("语言检测包已安装，自动检测会优先使用本地检测器。");
+      if (!translators.has(key)) {
+        const translator = withDeadline(window.Translator.create({
+          ...direction,
+          monitor(monitor) {
+            monitor.addEventListener("downloadprogress", (event) => updatePackProgress(language, event));
+          },
+        }), 180000, `${languageName(language)}语言包下载超时`).catch((error) => {
+          translators.delete(key);
+          throw error;
+        });
+        translators.set(key, translator);
+      }
+      await translators.get(key);
+      installedLanguages.add(language);
+      await persistInstalledLanguages();
+      refreshQuickLanguageOptions(source.value, target.value);
+      setPackManagerStatus(`${languageName(language)}语言包已下载。`);
     } catch (error) {
-      refreshPackStatus(error?.message || String(error));
+      installedLanguages.delete(language);
+      setPackManagerStatus(error?.message || String(error), true);
     } finally {
-      clearTimeout(stalledTimer);
-      downloadDetector.disabled = false;
+      downloadingLanguages.delete(language);
+      languagePackProgress.delete(language);
+      renderPackManager();
     }
+  }
+
+  async function deleteManagedLanguage(language) {
+    if (!language || !installedLanguages.has(language)) return;
+    const relatedTranslators = [];
+    for (const [key, pendingTranslator] of translators) {
+      if (!key.split(":").includes(language)) continue;
+      translators.delete(key);
+      relatedTranslators.push(pendingTranslator);
+    }
+    for (const pendingTranslator of relatedTranslators) {
+      Promise.resolve(pendingTranslator).then((translator) => translator?.destroy?.()).catch(() => {});
+    }
+    installedLanguages.delete(language);
+    setPackManagerStatus(`正在删除 ${languageName(language)} 的本工具记录…`);
+    try {
+      await persistInstalledLanguages();
+      refreshQuickLanguageOptions(source.value, target.value);
+      setPackManagerStatus(`${languageName(language)}已从翻译页移除。`);
+    } catch (error) {
+      installedLanguages.add(language);
+      setPackManagerStatus(error?.message || String(error), true);
+    }
+    renderPackManager();
   }
 
   async function showSettings() {
@@ -727,7 +828,6 @@
       status.textContent = "";
       refreshSettingsLanguageOptions();
       refreshEngineFields();
-      refreshPackStatus();
     } catch (error) {
       status.textContent = error?.message || String(error);
     }
@@ -735,19 +835,6 @@
 
   async function saveConfiguration(event) {
     event.preventDefault();
-    if (engine.value === "local") {
-      const selectedTarget = localLanguage(target.value);
-      const pairReady = source.value === "auto"
-        ? [...installedLanguagePairs].some((pair) => pair.endsWith(`:${selectedTarget}`))
-        : installedLanguagePairs.has(languagePairKey(source.value, target.value));
-      if (!pairReady) {
-        status.textContent = "";
-        refreshPackStatus(source.value === "auto"
-          ? "当前目标语言没有已安装的翻译包。请先选择具体源语言并下载。"
-          : "所选默认语言对尚未安装，请先下载翻译包。");
-        return;
-      }
-    }
     status.textContent = "正在保存…";
     try {
       const saved = await call("saveSettings", {
@@ -767,8 +854,21 @@
   async function copyResult() {
     if (!translatedText) return;
     await navigator.clipboard.writeText(translatedText).catch(() => {});
-    copy.textContent = "已复制";
-    setTimeout(() => { copy.textContent = "复制译文"; }, 1000);
+    copy.textContent = "✓";
+    copy.title = "已复制";
+    setTimeout(() => {
+      copy.textContent = "⧉";
+      copy.title = "复制译文";
+    }, 1000);
+  }
+
+  function markTranslationStale() {
+    if (!selectedText || translationView.style.display === "none") return;
+    translatedText = "";
+    result.className = "result loading";
+    result.textContent = "语言已更改，点击 ↻ 重新翻译。";
+    copy.style.display = "none";
+    retry.style.display = "block";
   }
 
   function onSelectionChange() {
@@ -786,7 +886,11 @@
     }
   }
 
-  function onKeyDown(event) { if (event.key === "Escape") closeAll(); }
+  function onKeyDown(event) {
+    if (event.key !== "Escape") return;
+    if (packManager.style.display === "block") closePackManager();
+    else closeAll();
+  }
 
   function toggleSettings() {
     if (settingsView.style.display === "block") showTranslationView();
@@ -794,28 +898,36 @@
   }
 
   $("#translate").addEventListener("click", translateSelection);
+  $("#open-packs").addEventListener("click", showPackManager);
   $("#open-settings").addEventListener("click", toggleSettings);
   $("#close").addEventListener("click", closeAll);
   $("#back-settings").addEventListener("click", showTranslationView);
-  downloadPack.addEventListener("click", downloadLocalLanguagePair);
-  downloadDetector.addEventListener("click", downloadLanguageDetector);
+  $("#close-packs").addEventListener("click", closePackManager);
+  packBackdrop.addEventListener("click", closePackManager);
+  languagePackList.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-language]");
+    if (!button) return;
+    if (button.dataset.action === "delete") deleteManagedLanguage(button.dataset.language);
+    else downloadManagedLanguage(button.dataset.language);
+  });
+  retry.addEventListener("click", translateSelection);
   copy.addEventListener("click", copyResult);
   source.addEventListener("change", () => {
     lastDetectedLanguage = null;
+    refreshQuickLanguageOptions(source.value, target.value);
     if (settingsView.style.display === "block") {
-      refreshPackStatus();
       return;
     }
-    refreshQuickLanguageOptions(source.value, target.value, "source");
-    saveQuickLanguages();
+    markTranslationStale();
+    saveQuickLanguages(false);
   });
   target.addEventListener("change", () => {
+    refreshQuickLanguageOptions(source.value, target.value);
     if (settingsView.style.display === "block") {
-      refreshPackStatus();
       return;
     }
-    refreshQuickLanguageOptions(source.value, target.value, "target");
-    saveQuickLanguages();
+    markTranslationStale();
+    saveQuickLanguages(false);
   });
   swapLanguages.addEventListener("click", swapLanguageDirection);
   engine.addEventListener("change", refreshEngineFields);
@@ -828,7 +940,7 @@
   document.documentElement.appendChild(host);
 
   window[STATE_KEY] = {
-    version: "0.7.3",
+    version: "0.8.2",
     destroy() {
       disposed = true;
       clearTimeout(timer);
