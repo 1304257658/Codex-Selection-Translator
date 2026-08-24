@@ -787,7 +787,7 @@
   document.documentElement.appendChild(host);
 
   window[STATE_KEY] = {
-    version: "0.7.0",
+    version: "0.7.1",
     destroy() {
       disposed = true;
       clearTimeout(timer);

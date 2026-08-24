@@ -1,6 +1,6 @@
 {
   "name": "codex-selection-translator",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "A lightweight, LLM-free selection translator for the Codex desktop app.",
   "private": true,
   "type": "module",

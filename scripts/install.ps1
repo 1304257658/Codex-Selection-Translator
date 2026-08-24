@@ -15,7 +15,8 @@ $requiredFiles = @(
   @{ Source = 'src\renderer.js'; Destination = 'src\renderer.js' },
   @{ Source = 'scripts\start-codex-with-hook.ps1'; Destination = 'scripts\start-codex-with-hook.ps1' },
   @{ Source = 'scripts\launch-hidden.vbs'; Destination = 'scripts\launch-hidden.vbs' },
-  @{ Source = 'scripts\uninstall.ps1'; Destination = 'scripts\uninstall.ps1' }
+  @{ Source = 'scripts\uninstall.ps1'; Destination = 'scripts\uninstall.ps1' },
+  @{ Source = 'assets\gts-root-r4.pem'; Destination = 'codex-ca-bundle.pem' }
 )
 $optionalFiles = @('codex-ca-bundle.pem')
 

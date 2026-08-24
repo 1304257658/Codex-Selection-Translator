@@ -52,7 +52,7 @@ $env:CODEX_TRANSLATOR_PROXY_URL = 'http://127.0.0.1:7890'
 $env:CODEX_TRANSLATOR_CA_BUNDLE = 'C:\path\to\proxy-ca.pem'
 ```
 
-项目目录中的可选 `codex-ca-bundle.pem` 会在安装时一起复制，但已被 Git 忽略，避免把本机代理证书提交到公开仓库。未配置代理时不需要该文件。
+项目内置公开的 `GTS Root R4` 证书，安装时会写入 `codex-ca-bundle.pem`，供 Codex 与 Node 翻译后端验证代理链路中的正常 GTS 证书。根目录中可选的 `codex-ca-bundle.pem` 仍被 Git 忽略；如果存在，安装器会用它覆盖内置证书，以支持需要私有 CA 的本机代理或 TLS 检查环境。
 
 ## 快速开始
 
@@ -172,6 +172,8 @@ scripts/
   uninstall.ps1              # 删除启动器、快捷方式和设置
   start-codex-with-hook.ps1  # Windows 启动器
   launch-hidden.vbs          # 无控制台窗口的日常启动入口
+assets/
+  gts-root-r4.pem            # 安装时附带的公开 GTS 根证书
 tests/                       # Node.js 单元测试
 start-hook.cmd               # 开发模式双击入口
 ```
