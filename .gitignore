@@ -2,6 +2,7 @@ node_modules/
 npm-debug.log*
 .DS_Store
 Thumbs.db
+.env
 
 # Local history and browser fixtures are not part of the published package.
 outputs/

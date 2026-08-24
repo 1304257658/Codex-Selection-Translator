@@ -45,12 +45,19 @@ Bing Web → Google Web
 
 ### 网络与代理
 
-远程翻译默认直连。如果本机 `127.0.0.1:10808` 正在监听，启动器会自动让 Codex 和 Node 翻译后端使用该代理。也可以通过环境变量显式配置：
+远程翻译默认直连。需要代理时，推荐复制示例配置；不同代理软件或电脑的端口可以各自设置，不再依赖代码中的固定端口：
 
-```powershell
-$env:CODEX_TRANSLATOR_PROXY_URL = 'http://127.0.0.1:7890'
-$env:CODEX_TRANSLATOR_CA_BUNDLE = 'C:\path\to\proxy-ca.pem'
+```text
+copy .env.example .env
 ```
+
+然后在 `.env` 中取消所需配置的注释，例如：
+
+```dotenv
+CODEX_TRANSLATOR_PROXY_URL=http://127.0.0.1:7890
+```
+
+`.env` 可配置代理地址、代理 CA 证书、Codex 程序路径和 CDP 端口；完整说明见 [`.env.example`](.env.example)。命令行参数和当前进程环境变量的优先级高于 `.env`。`.env` 已被 Git 忽略，不会意外提交本机路径和代理配置。
 
 项目内置公开的 `GTS Root R4` 证书，安装时会写入 `codex-ca-bundle.pem`，供 Codex 与 Node 翻译后端验证代理链路中的正常 GTS 证书。根目录中可选的 `codex-ca-bundle.pem` 仍被 Git 忽略；如果存在，安装器会用它覆盖内置证书，以支持需要私有 CA 的本机代理或 TLS 检查环境。
 
@@ -62,7 +69,7 @@ $env:CODEX_TRANSLATOR_CA_BUNDLE = 'C:\path\to\proxy-ca.pem'
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-安装器会把轻量启动器复制到 `%LOCALAPPDATA%\CodexSelectionTranslator`，优先复制 Codex 自带的 `resources\chatgpt-tray-light.ico`（找不到时再从 `ChatGPT.exe` 提取图标），并在桌面创建 `Codex Selection Translator` 快捷方式。之后：
+安装器会把轻量启动器和项目根目录中的 `.env` 复制到 `%LOCALAPPDATA%\CodexSelectionTranslator`，优先复制 Codex 自带的 `resources\chatgpt-tray-light.ico`（找不到时再从 `ChatGPT.exe` 提取图标），并在桌面创建 `Codex Selection Translator` 快捷方式。如果项目中没有 `.env`，首次安装会从 `.env.example` 创建一份全注释配置；重复安装不会覆盖安装目录中已有的 `.env`。之后：
 
 1. 完全退出 Codex，包括系统托盘中的后台进程。
 2. 双击桌面的 `Codex Selection Translator`。
@@ -174,6 +181,7 @@ scripts/
   launch-hidden.vbs          # 无控制台窗口的日常启动入口
 assets/
   gts-root-r4.pem            # 安装时附带的公开 GTS 根证书
+.env.example                 # 可复制为 .env 的本机启动配置示例
 tests/                       # Node.js 单元测试
 start-hook.cmd               # 开发模式双击入口
 ```

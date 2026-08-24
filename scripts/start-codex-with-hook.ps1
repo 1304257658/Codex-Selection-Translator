@@ -1,21 +1,77 @@
 # Keep this file ASCII-compatible because Windows PowerShell 5.1 misreads UTF-8 without a BOM.
 param(
-  [string]$CodexExe = $env:CODEX_DESKTOP_EXE,
-  [int]$Port = 9222,
+  [string]$CodexExe,
+  [int]$Port,
   [string]$LogPath,
-  [string]$ProxyUrl = $env:CODEX_TRANSLATOR_PROXY_URL,
-  [string]$CaBundlePath = $env:CODEX_TRANSLATOR_CA_BUNDLE
+  [string]$ProxyUrl,
+  [string]$CaBundlePath
 )
 
 $ErrorActionPreference = 'Stop'
 $scriptsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptsRoot
 $hookPath = Join-Path $root 'src\hook.mjs'
-$defaultProxyUrl = 'http://127.0.0.1:10808'
-if (-not $CaBundlePath) { $CaBundlePath = Join-Path $root 'codex-ca-bundle.pem' }
-$env:CODEX_TRANSLATOR_CDP_PORT = [string]$Port
 $backendMutex = New-Object System.Threading.Mutex($false, 'Local\CodexSelectionTranslatorBackend')
 $ownsBackendMutex = $false
+
+function Import-DotEnv {
+  param([string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+
+  $lineNumber = 0
+  foreach ($rawLine in [IO.File]::ReadAllLines($Path)) {
+    $lineNumber++
+    $line = $rawLine.Trim()
+    if (-not $line -or $line.StartsWith('#')) { continue }
+
+    $separator = $line.IndexOf('=')
+    if ($separator -lt 1) { throw "Invalid .env entry at line $lineNumber in $Path" }
+
+    $name = $line.Substring(0, $separator).Trim()
+    if ($name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
+      throw "Invalid .env variable name at line $lineNumber in $Path"
+    }
+
+    $value = $line.Substring($separator + 1).Trim()
+    if ($value.Length -ge 2) {
+      $first = $value[0]
+      $last = $value[$value.Length - 1]
+      if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+        $value = $value.Substring(1, $value.Length - 2)
+      }
+    }
+
+    if ([Environment]::GetEnvironmentVariable($name, 'Process') -eq $null) {
+      [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+    }
+  }
+}
+
+Import-DotEnv -Path (Join-Path $root '.env')
+
+if (-not $PSBoundParameters.ContainsKey('CodexExe')) { $CodexExe = $env:CODEX_DESKTOP_EXE }
+if (-not $PSBoundParameters.ContainsKey('ProxyUrl')) { $ProxyUrl = $env:CODEX_TRANSLATOR_PROXY_URL }
+if (-not $PSBoundParameters.ContainsKey('CaBundlePath')) { $CaBundlePath = $env:CODEX_TRANSLATOR_CA_BUNDLE }
+if (-not $PSBoundParameters.ContainsKey('Port')) {
+  if ($env:CODEX_TRANSLATOR_CDP_PORT) {
+    $parsedPort = 0
+    if (-not [int]::TryParse($env:CODEX_TRANSLATOR_CDP_PORT, [ref]$parsedPort)) {
+      throw 'CODEX_TRANSLATOR_CDP_PORT must be an integer.'
+    }
+    $Port = $parsedPort
+  } else {
+    $Port = 9222
+  }
+}
+if ($Port -lt 1 -or $Port -gt 65535) { throw 'The CDP port must be between 1 and 65535.' }
+
+$caBundleWasConfigured = [bool]$CaBundlePath
+if ($CaBundlePath -and -not [IO.Path]::IsPathRooted($CaBundlePath)) {
+  $CaBundlePath = Join-Path $root $CaBundlePath
+}
+if (-not $CaBundlePath) { $CaBundlePath = Join-Path $root 'codex-ca-bundle.pem' }
+$env:CODEX_TRANSLATOR_CDP_PORT = [string]$Port
 
 function Test-CdpPort {
   param([int]$CandidatePort)
@@ -102,14 +158,9 @@ function Find-CodexExecutable {
 }
 
 try {
-  $proxyWasConfigured = [bool]$ProxyUrl
-  if (-not $ProxyUrl -and (Test-CodexProxy -CandidateProxyUrl $defaultProxyUrl)) {
-    $ProxyUrl = $defaultProxyUrl
-  }
   if ($ProxyUrl) {
     if (-not (Test-CodexProxy -CandidateProxyUrl $ProxyUrl)) {
-      if ($proxyWasConfigured) { throw "Configured proxy is not reachable: $ProxyUrl" }
-      $ProxyUrl = $null
+      throw "Configured proxy is not reachable: $ProxyUrl"
     } else {
       $env:HTTP_PROXY = $ProxyUrl
       $env:HTTPS_PROXY = $ProxyUrl
@@ -121,7 +172,7 @@ try {
   if (Test-Path -LiteralPath $CaBundlePath -PathType Leaf) {
     $env:CODEX_CA_CERTIFICATE = $CaBundlePath
     $env:NODE_EXTRA_CA_CERTS = $CaBundlePath
-  } elseif ($env:CODEX_TRANSLATOR_CA_BUNDLE) {
+  } elseif ($caBundleWasConfigured) {
     throw "Configured CA bundle was not found: $CaBundlePath"
   }
 

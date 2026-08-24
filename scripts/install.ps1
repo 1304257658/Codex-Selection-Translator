@@ -16,9 +16,10 @@ $requiredFiles = @(
   @{ Source = 'scripts\start-codex-with-hook.ps1'; Destination = 'scripts\start-codex-with-hook.ps1' },
   @{ Source = 'scripts\launch-hidden.vbs'; Destination = 'scripts\launch-hidden.vbs' },
   @{ Source = 'scripts\uninstall.ps1'; Destination = 'scripts\uninstall.ps1' },
+  @{ Source = '.env.example'; Destination = '.env.example' },
   @{ Source = 'assets\gts-root-r4.pem'; Destination = 'codex-ca-bundle.pem' }
 )
-$optionalFiles = @('codex-ca-bundle.pem')
+$optionalFiles = @('.env', 'codex-ca-bundle.pem')
 
 function Find-CodexIconSource {
   function Resolve-IconSource([string]$ExecutablePath) {
@@ -87,6 +88,10 @@ foreach ($fileName in $optionalFiles) {
   if (Test-Path -LiteralPath $sourcePath -PathType Leaf) {
     Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $installPath $fileName) -Force
   }
+}
+$installedEnvPath = Join-Path $installPath '.env'
+if (-not (Test-Path -LiteralPath $installedEnvPath -PathType Leaf)) {
+  Copy-Item -LiteralPath (Join-Path $sourceRoot '.env.example') -Destination $installedEnvPath
 }
 Set-Content -LiteralPath (Join-Path $installPath '.codex-selection-translator') `
   -Value 'Codex Selection Translator' -Encoding ASCII
