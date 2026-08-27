@@ -75,12 +75,16 @@ $env:CODEX_TRANSLATOR_CDP_PORT = [string]$Port
 
 function Test-CdpPort {
   param([int]$CandidatePort)
-  try {
-    $null = Invoke-RestMethod -Uri "http://127.0.0.1:$CandidatePort/json/version" -TimeoutSec 1
-    return $true
-  } catch {
-    return $false
+  foreach ($candidateAddress in @('127.0.0.1', '[::1]')) {
+    try {
+      $null = Invoke-RestMethod -Uri "http://${candidateAddress}:$CandidatePort/json/version" -TimeoutSec 1
+      return $true
+    } catch {
+      # New Codex/Chromium builds may bind the debugging endpoint to only one
+      # loopback address even when launched with an explicit IPv4 address.
+    }
   }
+  return $false
 }
 
 function Test-CodexProxy {
@@ -165,7 +169,7 @@ try {
       $env:HTTP_PROXY = $ProxyUrl
       $env:HTTPS_PROXY = $ProxyUrl
       $env:ALL_PROXY = $ProxyUrl
-      $env:NO_PROXY = '127.0.0.1,localhost'
+      $env:NO_PROXY = '127.0.0.1,localhost,::1'
       $env:NODE_USE_ENV_PROXY = '1'
     }
   }
@@ -189,7 +193,7 @@ try {
       throw 'Codex is running without CDP. Fully exit Codex, then run this script again.'
     }
 
-    Write-Host "Starting Codex with CDP bound to 127.0.0.1:$Port ..."
+    Write-Host "Starting Codex with CDP on loopback port $Port ..."
     $codexArguments = @(
       "--remote-debugging-address=127.0.0.1",
       "--remote-debugging-port=$Port"

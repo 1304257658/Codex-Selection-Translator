@@ -6,6 +6,7 @@ import {
   bridgeBootstrap,
   DEFAULT_SETTINGS,
   bingLanguage,
+  findCodexTarget,
   normalizeSettings,
   normalizeTranslationText,
   parseBingAuth,
@@ -89,6 +90,33 @@ test("parses Bing web credentials and output", () => {
 test("maps Chinese codes for Bing Translator", () => {
   assert.equal(bingLanguage("zh-CN"), "zh-Hans");
   assert.equal(bingLanguage("zh-TW"), "zh-Hant");
+});
+
+test("finds the Codex target over IPv6 when IPv4 CDP is unavailable", async () => {
+  const requests = [];
+  const target = {
+    type: "page",
+    title: "ChatGPT",
+    url: "app://-/index.html",
+    webSocketDebuggerUrl: "ws://[::1]:9222/devtools/page/codex",
+  };
+
+  const result = await findCodexTarget({
+    port: 9222,
+    fetchImpl: async (url) => {
+      requests.push(String(url));
+      if (String(url).startsWith("http://127.0.0.1:")) {
+        throw new TypeError("fetch failed");
+      }
+      return Response.json([target]);
+    },
+  });
+
+  assert.deepEqual(requests, [
+    "http://127.0.0.1:9222/json/list",
+    "http://[::1]:9222/json/list",
+  ]);
+  assert.deepEqual(result, target);
 });
 
 test("falls back to the alternate Bing regional endpoint after a connect timeout", async () => {

@@ -441,15 +441,34 @@ export function bridgeBootstrap(rendererSource) {
 ${rendererSource}`;
 }
 
-async function findCodexTarget() {
-  const response = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`, { signal: withTimeout(1500) });
-  if (!response.ok) throw new Error(`CDP discovery HTTP ${response.status}`);
-  const targets = await response.json();
-  return targets.find((target) =>
-    target.type === "page" &&
-    typeof target.webSocketDebuggerUrl === "string" &&
-    (String(target.url).startsWith("app://") || /codex|chatgpt/i.test(`${target.title} ${target.url}`))
-  );
+export async function findCodexTarget({
+  port = CDP_PORT,
+  fetchImpl = fetch,
+  timeoutMs = 1500,
+} = {}) {
+  const origins = [`http://127.0.0.1:${port}`, `http://[::1]:${port}`];
+  const errors = [];
+  let endpointReached = false;
+
+  for (const origin of origins) {
+    try {
+      const response = await fetchImpl(`${origin}/json/list`, { signal: withTimeout(timeoutMs) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const targets = await response.json();
+      endpointReached = true;
+      const target = targets.find((candidate) =>
+        candidate.type === "page" &&
+        typeof candidate.webSocketDebuggerUrl === "string" &&
+        (String(candidate.url).startsWith("app://") || /codex|chatgpt/i.test(`${candidate.title} ${candidate.url}`))
+      );
+      if (target) return target;
+    } catch (error) {
+      errors.push(`${origin}: ${error.message}`);
+    }
+  }
+
+  if (endpointReached) return null;
+  throw new Error(`CDP discovery failed (${errors.join("; ")})`);
 }
 
 async function runInjection(target, rendererSource) {
@@ -477,7 +496,7 @@ export async function main() {
   const disconnectGraceMs = 30000;
   let connectedOnce = false;
   let disconnectedAt = 0;
-  console.log(`[translator] 等待 Codex CDP：127.0.0.1:${CDP_PORT}`);
+  console.log(`[translator] 等待 Codex CDP：127.0.0.1/[::1]:${CDP_PORT}`);
   try {
     for (;;) {
       try {
