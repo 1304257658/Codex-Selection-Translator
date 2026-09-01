@@ -64,8 +64,10 @@
       }
       .swap:hover:not(:disabled) { background:rgba(255,255,255,.08); color:#fff; }
       .swap:disabled { opacity:.35; cursor:default; }
+      .speech-row { display:grid; grid-template-columns:minmax(0,1fr) 32px; align-items:start; gap:6px; }
       .original { margin-top:8px; color:#9aa0a6; font-size:12px; overflow-wrap:anywhere; }
       .result { margin-top:10px; font-size:16px; white-space:pre-wrap; overflow-wrap:anywhere; }
+      .speech-row .speech-button { margin-top:6px; }
       .loading { color:#9aa0a6; } .error { color:#f28b82; }
       .foot { display:flex; justify-content:flex-end; gap:4px; margin-top:10px; }
       .symbol-button {
@@ -151,8 +153,8 @@
         <select id="target" aria-label="目标语言" title="目标语言"></select>
       </div>
       <div id="translation-view">
-        <div class="original"></div>
-        <div class="result"></div>
+        <div class="speech-row"><div class="original"></div><button class="symbol-button speech-button" id="speak-original" type="button" data-idle-label="播放原文" aria-label="播放原文" title="播放原文">🔊</button></div>
+        <div class="speech-row"><div class="result"></div><button class="symbol-button speech-button" id="speak-translation" type="button" data-idle-label="播放译文" aria-label="播放译文" title="播放译文" style="display:none">🔊</button></div>
         <div class="foot"><button class="retry symbol-button" type="button" aria-label="重试翻译" title="重试翻译">↻</button><button class="copy symbol-button" type="button" aria-label="复制译文" title="复制译文">⧉</button></div>
       </div>
       <form id="settings">
@@ -182,6 +184,8 @@
   const result = $(".result");
   const original = $(".original");
   const copy = $(".copy");
+  const speakOriginal = $("#speak-original");
+  const speakTranslation = $("#speak-translation");
   const engine = $("#engine");
   const source = $("#source");
   const target = $("#target");
@@ -208,6 +212,8 @@
   let selectionRect = null;
   let translatedText = "";
   let translationTitle = "划词翻译";
+  let activeUtterance = null;
+  let activeSpeechButton = null;
   let timer = 0;
   let disposed = false;
 
@@ -567,6 +573,7 @@
   }
 
   function closeAll() {
+    cancelSpeech();
     actions.style.display = "none";
     card.style.display = "none";
     packBackdrop.style.display = "none";
@@ -590,6 +597,7 @@
 
   async function translateSelection() {
     if (!selectedText) return;
+    cancelSpeech();
     translationTitle = "划词翻译";
     showTranslationView();
     original.textContent = selectedText;
@@ -597,6 +605,7 @@
     result.textContent = "正在翻译…";
     copy.style.display = "none";
     retry.style.display = "none";
+    speakTranslation.style.display = "none";
     try {
       try {
         await settingsPromise;
@@ -626,10 +635,12 @@
       result.textContent = translatedText;
       copy.style.display = "block";
       retry.style.display = "block";
+      speakTranslation.style.display = "block";
     } catch (error) {
       result.className = "result error";
       result.textContent = error?.message || String(error);
       retry.style.display = "block";
+      speakTranslation.style.display = "none";
     }
   }
 
@@ -862,13 +873,72 @@
     }, 1000);
   }
 
+  function resetSpeechButton(button) {
+    if (!button) return;
+    const label = button.dataset.idleLabel;
+    button.textContent = "🔊";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+
+  function cancelSpeech() {
+    const previousButton = activeSpeechButton;
+    activeUtterance = null;
+    activeSpeechButton = null;
+    window.speechSynthesis?.cancel?.();
+    resetSpeechButton(previousButton);
+  }
+
+  function speakText(text, language, button) {
+    const speech = window.speechSynthesis;
+    if (!text || !speech || typeof window.SpeechSynthesisUtterance !== "function") {
+      button.disabled = true;
+      button.title = "当前环境不支持语音播放";
+      return;
+    }
+    if (activeSpeechButton === button) {
+      cancelSpeech();
+      return;
+    }
+
+    cancelSpeech();
+    const utterance = new window.SpeechSynthesisUtterance(text);
+    if (language && language !== "auto") {
+      utterance.lang = language;
+      const languageCode = language.toLowerCase();
+      const primaryLanguage = languageCode.split("-")[0];
+      const voices = speech.getVoices?.() || [];
+      const voice = voices.find((candidate) => candidate.lang.toLowerCase() === languageCode)
+        || voices.find((voice) => voice.lang.toLowerCase().split("-")[0] === primaryLanguage)
+        || null;
+      if (voice) utterance.voice = voice;
+    }
+
+    activeUtterance = utterance;
+    activeSpeechButton = button;
+    button.textContent = "■";
+    button.title = "停止播放";
+    button.setAttribute("aria-label", "停止播放");
+    const finish = () => {
+      if (activeUtterance !== utterance) return;
+      activeUtterance = null;
+      activeSpeechButton = null;
+      resetSpeechButton(button);
+    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    window.speechSynthesis.speak(utterance);
+  }
+
   function markTranslationStale() {
     if (!selectedText || translationView.style.display === "none") return;
+    cancelSpeech();
     translatedText = "";
     result.className = "result loading";
     result.textContent = "语言已更改，点击 ↻ 重新翻译。";
     copy.style.display = "none";
     retry.style.display = "block";
+    speakTranslation.style.display = "none";
   }
 
   function onSelectionChange() {
@@ -912,6 +982,15 @@
   });
   retry.addEventListener("click", translateSelection);
   copy.addEventListener("click", copyResult);
+  speakOriginal.addEventListener("click", () => {
+    const language = source.value === "auto"
+      ? (lastDetectedLanguage || guessLanguage(selectedText))
+      : source.value;
+    speakText(selectedText, language, speakOriginal);
+  });
+  speakTranslation.addEventListener("click", () => {
+    speakText(translatedText, target.value, speakTranslation);
+  });
   source.addEventListener("change", () => {
     lastDetectedLanguage = null;
     refreshQuickLanguageOptions(source.value, target.value);
@@ -940,7 +1019,7 @@
   document.documentElement.appendChild(host);
 
   window[STATE_KEY] = {
-    version: "0.8.2",
+    version: "0.9.0",
     destroy() {
       disposed = true;
       clearTimeout(timer);
